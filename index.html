@@ -498,7 +498,7 @@
 
       textEl.textContent =
         "⏳ Generando explicación con el Space " +
-        HF_SPACE_ID + " (endpoint " + HF_ENDPOINT + ")…";
+        HF_SPACE_ID + " (endpoint " + HF_ENDPOINT + ")…tardara minimo 5 minutos";
 
       try {
         const result = await hfClient.predict(HF_ENDPOINT, [promptFinal]);
@@ -880,3 +880,4 @@
   </script>
 </body>
 </html>
+
