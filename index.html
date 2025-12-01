@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>CHATBOT para uso de los CSV de Consumertec</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- PapaParse para procesar CSV en el navegador -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#020617;
+      --card:#020617;
+      --border:#1f2937;
+      --accent:#22d3ee;
+      --accent2:#4ade80;
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+      background:radial-gradient(circle at top,#0f172a,#020617);
+      color:var(--text);
+      padding:10px;
+    }
+    .card{
+      width:min(1100px,100%);
+      max-height:96vh;
+      background:var(--card);
+      border-radius:20px;
+      border:1px solid var(--border);
+      padding:18px 20px;
+      box-shadow:0 22px 50px rgba(0,0,0,0.6);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      overflow-y:auto;
+    }
+    h1{
+      font-size:1.7rem;
+      text-align:center;
+      margin-bottom:4px;
+    }
+    p{
+      font-size:0.9rem;
+      line-height:1.5;
+      color:var(--muted);
+      text-align:justify;
+      text-justify:inter-word;
+    }
+    .section-title{
+      font-size:1rem;
+      font-weight:600;
+      margin-bottom:4px;
+      margin-top:8px;
+    }
+    label{
+      font-size:0.85rem;
+      margin-bottom:4px;
+      display:block;
+      color:var(--muted);
+    }
+    input[type="file"]{
+      width:100%;
+      padding:8px;
+      border-radius:10px;
+      border:1px dashed var(--border);
+      background:#020617;
+      color:var(--muted);
+      font-size:0.85rem;
+    }
+    textarea{
+      width:100%;
+      min-height:90px;
+      max-height:200px;
+      resize:vertical;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#020617;
+      color:var(--text);
+      padding:8px 10px;
+      font-size:0.85rem;
+      line-height:1.4;
+    }
+    .row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:6px;
+      align-items:center;
+    }
+    .row > *{
+      flex:1 1 auto;
+    }
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:8px 16px;
+      border-radius:999px;
+      text-decoration:none;
+      border:none;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      color:#020617;
+      font-weight:600;
+      font-size:0.85rem;
+      letter-spacing:0.02em;
+      cursor:pointer;
+      transition:transform 0.1s ease, filter 0.1s ease;
+      white-space:nowrap;
+    }
+    .btn.secondary{
+      background:#111827;
+      color:var(--muted);
+      border:1px solid var(--border);
+    }
+    .btn:hover{
+      filter:brightness(1.06);
+      transform:translateY(-1px);
+    }
+    .status{
+      font-size:0.83rem;
+      color:var(--muted);
+      margin-top:4px;
+    }
+    .output-box{
+      margin-top:8px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#020617;
+      padding:8px 10px;
+      font-size:0.83rem;
+      line-height:1.45;
+      max-height:260px;
+      overflow:auto;
+      white-space:pre-wrap;
+    }
+    .small{
+      font-size:0.8rem;
+      color:var(--muted);
+    }
+    .mode-options{
+      display:flex;
+      gap:12px;
+      margin-top:4px;
+      flex-wrap:wrap;
+    }
+    .mode-options label{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      cursor:pointer;
+      font-size:0.85rem;
+    }
+    .mode-options input[type="radio"]{
+      accent-color:#22d3ee;
+      width:16px;
+      height:16px;
+    }
+    /* Sección 6: más alta y scrollbar garantizado para textos largos */
+    #textOutput{
+      max-height:60vh;
+      overflow-y:auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>CHATBOT para uso de los CSV de Consumertec</h1>
+    <p>
+      Este chatbot está diseñado para trabajar con archivos <strong>OUTPUT_MAP_COMPARISONS.csv</strong> y
+      otros CSV derivados de los experimentos de Consumertec. Primero se elige el tipo de análisis:
+      (1) comparaciones de <strong>PRODUCT_TEST</strong> frente a <strong>PRODUCT_BENCH</strong> usando la columna RESPONSE,
+      o (2) evaluación de <strong>blancura por MONITOR</strong> usando las métricas WI. Después se sube el CSV
+      correspondiente y se ejecuta el análisis. También existe un modo de <strong>Pregunta Abierta</strong> para escribir
+      cualquier prompt y recibir una respuesta larga basada en los resultados calculados.
+    </p>
+
+    <!-- Estado del motor remoto -->
+    <div id="llmStatus" class="status small">
+      ℹ️ En modo Pregunta Abierta se usará el Space alexacido/consumertec-llm para generar la explicación larga.
+    </div>
+
+    <!-- Elegir modo -->
+    <div>
+      <div class="section-title">1. Elegir tipo de análisis (check box)</div>
+      <div class="mode-options">
+        <label>
+          <input type="radio" name="mode" id="modeComparacion" value="comparaciones"
+                 onclick="setMode('comparaciones')" />
+          Comparación (PRODUCT_TEST vs RESPONSE)
+        </label>
+        <label>
+          <input type="radio" name="mode" id="modeBlancura" value="whiteness"
+                 onclick="setMode('whiteness')" />
+          Blancura por MONITOR (métricas WI)
+        </label>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary" type="button" onclick="activarPreguntaAbierta()">
+          Pregunta Abierta
+        </button>
+      </div>
+      <div class="status small" id="modeStatus">
+        Después de elegir el tipo de análisis, se pedirá subir el archivo CSV correcto para ese modo.
+        Si activas Pregunta Abierta, el prompt libre se enviará al Space junto con los resultados numéricos.
+      </div>
+    </div>
+
+    <!-- Subir CSV -->
+    <div>
+      <div class="section-title">2. Subir archivo CSV según el tipo elegido</div>
+      <label for="csvInput" id="csvLabel">
+        Primero selecciona el tipo de análisis arriba. Luego podrás subir el CSV correspondiente.
+      </label>
+      <input id="csvInput" type="file" accept=".csv" />
+      <div id="fileStatus" class="status">⚠️ Ningún archivo seleccionado.</div>
+    </div>
+
+    <!-- Pregunta / Prompt -->
+    <div>
+      <div class="section-title">3. Pregunta / prompt</div>
+      <label for="question">
+        Si usas Pregunta Abierta, escribe aquí tu prompt libre (cualquier pregunta respecto a la tabla).
+        Si no, se cargará uno recomendado según el modo.
+      </label>
+      <textarea id="question" placeholder="Primero elige el tipo de análisis o pulsa Pregunta Abierta para escribir tu prompt..."></textarea>
+      <div class="row">
+        <button class="btn" type="button" onclick="analizarCSV()">
+          4. Analizar CSV
+        </button>
+      </div>
+      <div id="analysisStatus" class="status">
+        ⏳ Esperando que elijas el tipo de análisis, subas el CSV correcto y uses el botón Analizar.
+      </div>
+    </div>
+
+    <!-- Resultados de cómputo -->
+    <div>
+      <div class="section-title">5. Resultados numéricos (resumen técnico)</div>
+      <div id="numericOutput" class="output-box small">
+        // Aquí aparecerán tablas de conteos, máximos por producto, etc.
+      </div>
+    </div>
+
+    <!-- Explicación en texto continuo -->
+    <div>
+      <div class="section-title">6. Explicación en texto continuo (respuesta extendida)</div>
+      <div id="textOutput" class="output-box">
+        // Aquí se generará una explicación automática extensa basada en los resultados y en tu prompt.
+      </div>
+    </div>
+  </div>
+
+  <!-- Lógica: CSV + LLM remoto en Pregunta Abierta -->
+  <script type="module">
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+
+    // -------------------------------------------------------------
+    // Configuración del Space remoto
+    // -------------------------------------------------------------
+    const HF_SPACE_ID = "alexacido/consumertec-llm";
+    const HF_ENDPOINT = "/generate_answer";
+
+    let hfClient = null;
+    let hfReady  = false;
+
+    async function initHFClient() {
+      const llmStatusEl = document.getElementById("llmStatus");
+      try {
+        if (llmStatusEl) {
+          llmStatusEl.textContent = "⏳ Conectando con el Space " + HF_SPACE_ID + "…";
+        }
+        hfClient = await Client.connect(HF_SPACE_ID);
+        hfReady = true;
+        if (llmStatusEl) {
+          llmStatusEl.textContent =
+            "✅ Conectado al Space " + HF_SPACE_ID +
+            ". En Pregunta Abierta se usará el endpoint " + HF_ENDPOINT + ".";
+        }
+      } catch (err) {
+        console.error("Error conectando a Hugging Face Space:", err);
+        hfReady = false;
+        if (llmStatusEl) {
+          llmStatusEl.textContent =
+            "❌ No se pudo conectar al Space. En Pregunta Abierta se usará solo la explicación interna.";
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Estado global
+    // -------------------------------------------------------------
+    let csvFile = null;
+    let csvHeaders = null;
+    let analysisMode = null;        // 'comparaciones' o 'whiteness'
+    let openQuestionMode = false;   // true si se pulsa "Pregunta Abierta"
+
+    const whitenessMetrics = [
+      "1.2.WI_STw",
+      "2.2.WI_GEw",
+      "3.2.WI_VOw",
+      "4.2.WI_LGw"
+    ];
+
+    const csvInputEl   = document.getElementById("csvInput");
+    const fileStatusEl = document.getElementById("fileStatus");
+    const csvLabelEl   = document.getElementById("csvLabel");
+    const modeStatusEl = document.getElementById("modeStatus");
+
+    // -------------------------------------------------------------
+    // Manejo de subida de archivo (validación por modo)
+    // -------------------------------------------------------------
+    csvInputEl.addEventListener("change", (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+
+      if (!analysisMode) {
+        csvFile = null;
+        csvHeaders = null;
+        csvInputEl.value = "";
+        fileStatusEl.textContent = "⚠️ Primero elige el tipo de análisis (Comparación o Blancura).";
+        return;
+      }
+
+      if (!file) {
+        csvFile = null;
+        csvHeaders = null;
+        fileStatusEl.textContent = "⚠️ Ningún archivo seleccionado.";
+        return;
+      }
+
+      fileStatusEl.textContent =
+        "⏳ Leyendo archivo: " + file.name + " (" + formatBytes(file.size) + ")…";
+
+      Papa.parse(file, {
+        header: true,
+        preview: 5,
+        skipEmptyLines: true,
+        complete: function(results) {
+          const headers = results.meta && results.meta.fields ? results.meta.fields : [];
+          csvHeaders = headers;
+          const valid = validarHeadersPorModo(analysisMode, headers);
+
+          if (!valid.ok) {
+            csvFile = null;
+            csvInputEl.value = "";
+            fileStatusEl.textContent = "❌ El archivo no corresponde al modo seleccionado: " + valid.mensaje;
+          } else {
+            csvFile = file;
+            fileStatusEl.textContent = "✅ Archivo válido para el modo " +
+              (analysisMode === "comparaciones" ? "Comparación" : "Blancura") +
+              ": " + file.name + " (" + formatBytes(file.size) + ")";
+          }
+        },
+        error: function(err) {
+          csvFile = null;
+          csvHeaders = null;
+          csvInputEl.value = "";
+          fileStatusEl.textContent = "❌ Error al leer el CSV: " + err;
+        }
+      });
+    });
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B","KB","MB","GB","TB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    }
+
+    // -------------------------------------------------------------
+    // Validación de columnas según modo
+    // -------------------------------------------------------------
+    function validarHeadersPorModo(mode, headers) {
+      const hdr = headers || [];
+      const set = new Set(hdr);
+
+      if (mode === "comparaciones") {
+        const needed = ["PRODUCT_TEST", "RESPONSE"];
+        const faltantes = needed.filter(c => !set.has(c));
+        if (faltantes.length > 0) {
+          return {
+            ok: false,
+            mensaje: "faltan columnas requeridas (" + faltantes.join(", ") +
+                     "). Revisa que sea el CSV de comparaciones (PRODUCT_TEST / RESPONSE)."
+          };
+        }
+        return { ok: true, mensaje: "" };
+      }
+
+      if (mode === "whiteness") {
+        const base = ["MONITOR", "PRODUCT"];
+        const faltantesBase = base.filter(c => !set.has(c));
+        if (faltantesBase.length > 0) {
+          return {
+            ok: false,
+            mensaje: "faltan columnas base " + faltantesBase.join(", ") +
+                     " para análisis de blancura (MONITOR / PRODUCT)."
+          };
+        }
+        const algunaMetrica = whitenessMetrics.some(m => set.has(m));
+        if (!algunaMetrica) {
+          return {
+            ok: false,
+            mensaje: "no se encontró ninguna de las métricas de blancura esperadas: " +
+                     whitenessMetrics.join(", ") + "."
+          };
+        }
+        return { ok: true, mensaje: "" };
+      }
+
+      return { ok: false, mensaje: "modo de análisis no reconocido." };
+    }
+
+    // -------------------------------------------------------------
+    // Selección de modo y carga de prompts
+    // -------------------------------------------------------------
+    function setModeInternal(mode) {
+      analysisMode = mode;
+      openQuestionMode = false;
+
+      csvFile = null;
+      csvHeaders = null;
+      csvInputEl.value = "";
+      fileStatusEl.textContent = "📥 Ahora sube el CSV de " +
+        (mode === "comparaciones" ? "Comparación (PRODUCT_TEST vs RESPONSE)." : "Blancura por MONITOR (métricas WI).");
+
+      const questionEl = document.getElementById("question");
+      questionEl.placeholder =
+        "Prompt oficial cargado para el modo elegido. Puedes ajustarlo si lo deseas…";
+
+      if (mode === "comparaciones") {
+        questionEl.value =
+`Analiza el archivo OUTPUT_MAP_COMPARISONS.csv para identificar cuál es el producto con mejor desempeño general. Para ello, toma en cuenta únicamente las comparaciones en las que la columna RESPONSE tenga los valores 01.SUPERIOR o 02.SUPERIOR_TREND, que indican un resultado favorable para PRODUCT_TEST frente a PRODUCT_BENCH. Evalúa cuántas veces cada valor de PRODUCT_TEST alcanza un resultado superior en todas las combinaciones posibles de las columnas MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD. El producto que más veces obtenga resultados favorables según estos dos valores de RESPONSE debe ser considerado como el de mejor desempeño. La conclusión debe presentarse en texto continuo, indicando claramente cuál es el producto con mejor rendimiento y por qué, basándose en la frecuencia con la que obtiene un desempeño superior en las comparaciones.`;
+      } else if (mode === "whiteness") {
+        questionEl.value =
+`Para cada uno de los valores únicos de la columna "MONITOR", identifica cuáles son los productos ("PRODUCT") que presentan los valores más altos en cada una de las métricas de blancura: "1.2.WI_STw" (blancura estándar), "2.2.WI_GEw" (blancura verdosa), "3.2.WI_VOw" (blancura violácea) y "4.2.WI_LGw" (blancura luminosa). Para cada caso, indica en qué combinaciones específicas de las variables "MODALITY", "SCENARIOS", "WASH" y "PROCESS" se presentan esos valores máximos. Luego, compara entre los distintos productos dentro de cada tipo de monitor, resaltando si algún producto se destaca de forma consistente en más de una métrica o en múltiples combinaciones. Finalmente, resume qué productos muestran un mejor desempeño global de blancura en función del tipo de monitor utilizado, considerando la frecuencia con la que aparecen con los valores más altos y la diversidad de condiciones en las que lo hacen.`;
+      }
+
+      modeStatusEl.textContent =
+        "✅ Tipo de análisis seleccionado: " +
+        (mode === "comparaciones"
+          ? "Comparación PRODUCT_TEST vs RESPONSE (usa prompt interno)."
+          : "Blancura por MONITOR (usa prompt interno).");
+      csvLabelEl.textContent =
+        "Sube ahora el CSV correspondiente al modo seleccionado (" +
+        (mode === "comparaciones" ? "Comparación" : "Blancura") + ").";
+    }
+
+    window.setMode = setModeInternal;
+
+    // -------------------------------------------------------------
+    // Activar Pregunta Abierta (usa LLM remoto)
+    // -------------------------------------------------------------
+    function activarPreguntaAbierta() {
+      openQuestionMode = true;
+      const qEl = document.getElementById("question");
+      qEl.value = "";
+      qEl.placeholder =
+        "Modo Pregunta Abierta activado. Escribe aquí cualquier prompt o pregunta sobre los datos del CSV…";
+      modeStatusEl.textContent =
+        "📝 Modo Pregunta Abierta: el prompt se enviará al Space alexacido/consumertec-llm junto con los resultados numéricos. Las respuestas internas quedan en pausa.";
+    }
+
+    window.activarPreguntaAbierta = activarPreguntaAbierta;
+
+    // -------------------------------------------------------------
+    // Llamada al Space en Pregunta Abierta
+    // -------------------------------------------------------------
+    async function generarExplicacionConLLM(contextoNumerico, promptUsuario, fallbackBuilder) {
+      const textEl = document.getElementById("textOutput");
+      const llmStatusEl = document.getElementById("llmStatus");
+      if (!textEl) return;
+
+      const promptFinal =
+        "Eres un analista senior de datos de Consumertec. Recibes un contexto numérico calculado a partir de un CSV y una pregunta o prompt del usuario.\n" +
+        "Debes responder con un texto claro y estructurado en español, explicando las conclusiones y destacando patrones importantes.\n\n" +
+        "=== CONTEXTO NUMÉRICO ===\n" +
+        contextoNumerico +
+        "\n\n=== PREGUNTA / PROMPT DEL USUARIO ===\n" +
+        (promptUsuario || "(sin prompt explícito)") + "\n";
+
+      if (!hfReady || !hfClient) {
+        textEl.textContent = fallbackBuilder();
+        if (llmStatusEl) {
+          llmStatusEl.textContent =
+            "ℹ️ Space no disponible. Se usó explicación interna en Pregunta Abierta.";
+        }
+        return;
+      }
+
+      textEl.textContent =
+        "⏳ Generando explicación con el Space " +
+        HF_SPACE_ID + " (endpoint " + HF_ENDPOINT + ")…";
+
+      try {
+        const result = await hfClient.predict(HF_ENDPOINT, [promptFinal]);
+
+        let answer = "";
+        if (Array.isArray(result?.data)) {
+          answer = result.data[0];
+        } else if (typeof result?.data === "string") {
+          answer = result.data;
+        } else if (result?.data != null) {
+          answer = JSON.stringify(result.data, null, 2);
+        }
+
+        if (!answer || !String(answer).trim()) {
+          textEl.textContent =
+            "⚠️ El Space no devolvió texto utilizable. Se muestra explicación interna.\n\n" +
+            fallbackBuilder();
+          if (llmStatusEl) {
+            llmStatusEl.textContent =
+              "⚠️ Respuesta vacía del Space. Usando explicación interna.";
+          }
+        } else {
+          textEl.textContent = answer;
+          if (llmStatusEl) {
+            llmStatusEl.textContent =
+              "✅ Explicación generada por el Space " + HF_SPACE_ID + ".";
+          }
+        }
+      } catch (err) {
+        console.error("Error llamando al Space:", err);
+        textEl.textContent =
+          "❌ Error al usar el Space. Se muestra explicación interna.\n\n" +
+          fallbackBuilder();
+        if (llmStatusEl) {
+          llmStatusEl.textContent =
+            "❌ Error en la llamada al Space. Usando explicación interna.";
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Botón principal: analizar CSV
+    // -------------------------------------------------------------
+    function analizarCSVInternal() {
+      const statusEl = document.getElementById("analysisStatus");
+      const numericEl = document.getElementById("numericOutput");
+      const textEl = document.getElementById("textOutput");
+      const question = document.getElementById("question").value.trim();
+
+      if (!analysisMode) {
+        statusEl.textContent = "⚠️ Primero elige el tipo de análisis (Comparación o Blancura).";
+        return;
+      }
+      if (!csvFile) {
+        statusEl.textContent = "⚠️ Sube el archivo CSV correcto para el modo seleccionado.";
+        return;
+      }
+      if (openQuestionMode && !question) {
+        statusEl.textContent = "⚠️ Estás en Pregunta Abierta. Escribe un prompt.";
+        return;
+      }
+
+      statusEl.textContent = "⏳ Analizando CSV en modo: " +
+        (analysisMode === "whiteness" ? "BLANCURA" : "COMPARACIONES") + "…";
+
+      numericEl.textContent = "// Procesando CSV, esto puede tardar para archivos grandes…";
+      textEl.textContent = "// Preparando explicación…";
+
+      if (analysisMode === "whiteness") {
+        analizarBlancura(statusEl, numericEl, textEl, question);
+      } else {
+        analizarComparaciones(statusEl, numericEl, textEl, question);
+      }
+    }
+
+    window.analizarCSV = analizarCSVInternal;
+
+    // -------------------------------------------------------------
+    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE
+    // -------------------------------------------------------------
+    function analizarComparaciones(statusEl, numericEl, textEl, userPrompt) {
+      const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
+      const conteos = {};
+      let totalFilas = 0;
+      let totalFiltradas = 0;
+
+      Papa.parse(csvFile, {
+        header: true,
+        skipEmptyLines: true,
+        worker: false,
+        chunkSize: 1024 * 1024,
+        chunk: function(results) {
+          const rows = results.data;
+          for (const row of rows) {
+            totalFilas++;
+            const resp = (row["RESPONSE"] || "").trim();
+            if (objetivos.has(resp)) {
+              totalFiltradas++;
+              const ptest = (row["PRODUCT_TEST"] || "").trim() || "(VACÍO)";
+              conteos[ptest] = (conteos[ptest] || 0) + 1;
+            }
+          }
+        },
+        complete: function() {
+          if (Object.keys(conteos).length === 0) {
+            statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
+            numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
+            textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión.";
+            return;
+          }
+
+          const ordenados = Object.entries(conteos).sort((a,b) => b[1] - a[1]);
+          const totalFavorables = ordenados.reduce((s, [,c]) => s + c, 0);
+
+          let numTxt = "";
+          numTxt += "Total de filas leídas: " + totalFilas + "\n";
+          numTxt += "Filas con RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}: " + totalFiltradas + "\n\n";
+          numTxt += "Conteo de resultados favorables por PRODUCT_TEST:\n";
+          for (const [prod, cnt] of ordenados) {
+            const pct = totalFavorables > 0 ? (cnt * 100 / totalFavorables).toFixed(2) + "%" : "–";
+            numTxt += "  - " + prod + ": " + cnt + " (" + pct + " de los favorables)\n";
+          }
+          numericEl.textContent = numTxt;
+
+          if (openQuestionMode) {
+            generarExplicacionConLLM(
+              numTxt,
+              userPrompt,
+              () => construirExplicacionLargaAbierta(
+                userPrompt,
+                "comparaciones",
+                {
+                  totalFilas,
+                  totalFiltradas,
+                  totalFavorables,
+                  ranking: ordenados
+                }
+              )
+            );
+          } else {
+            textEl.textContent = construirExplicacionLargaComparaciones(
+              userPrompt,
+              ordenados,
+              totalFilas,
+              totalFiltradas,
+              totalFavorables
+            );
+          }
+
+          statusEl.textContent = "✅ Análisis de comparaciones completado.";
+        },
+        error: function(err) {
+          statusEl.textContent = "❌ Error al leer el CSV: " + err;
+          numericEl.textContent = "// Error al procesar el archivo.";
+          textEl.textContent = "";
+        }
+      });
+    }
+
+    function construirExplicacionLargaComparaciones(
+      userPrompt,
+      ordenados,
+      totalFilas,
+      totalFiltradas,
+      totalFavorables
+    ) {
+      const [prodGanador, cntGanador] = ordenados[0];
+      const pctGanador = totalFavorables > 0 ? (cntGanador * 100 / totalFavorables).toFixed(1) : null;
+      const otros = ordenados.slice(1, Math.min(6, ordenados.length));
+      const promptIntro = userPrompt
+        ? "La pregunta planteada por el usuario fue la siguiente: «" +
+          userPrompt.replace(/\s+/g, " ").trim() +
+          "». A partir de esta petición, el análisis se centra en estudiar el comportamiento de PRODUCT_TEST frente a PRODUCT_BENCH utilizando únicamente las filas del CSV donde la respuesta indica una superioridad clara.\n\n"
+        : "En este análisis se ha considerado la información contenida en el archivo de comparaciones, enfocándose en las filas donde la respuesta indica un desempeño superior para PRODUCT_TEST frente a PRODUCT_BENCH.\n\n";
+
+      let texto = "";
+
+      texto += promptIntro;
+      texto += "El archivo incluye un total de " + totalFilas + " filas, pero para evaluar el desempeño real de los productos se filtraron únicamente aquellos casos en los que la columna RESPONSE toma los valores 01.SUPERIOR o 02.SUPERIOR_TREND. ";
+      texto += "Tras este filtrado, quedaron " + totalFiltradas + " observaciones que pueden considerarse evidencias de superioridad o tendencia a la superioridad. ";
+      texto += "A partir de este conjunto depurado se contabilizó cuántas veces cada valor de PRODUCT_TEST aparece asociado a un resultado favorable, agrupando todos los escenarios de MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD para tener una visión global.\n\n";
+
+      texto += "Los resultados muestran que el producto que más veces alcanza un resultado favorable es «" + prodGanador + "», con " + cntGanador + " ocurrencias. ";
+      if (pctGanador !== null) {
+        texto += "Si se compara este número con el total de casos favorables, «" + prodGanador + "» concentra aproximadamente el " + pctGanador + "% de todas las situaciones en las que algún producto gana frente al benchmark. ";
+      }
+      texto += "Este nivel de presencia indica que «" + prodGanador + "» tiende a repetir este comportamiento a lo largo de diversas combinaciones de condiciones de lavado, tipo de tejido, escenario de suciedad, monitor de evaluación y umbral de decisión.\n\n";
+
+      if (otros.length > 0) {
+        texto += "Cuando se observa el resto de productos, aparecen otras formulaciones que logran también un número significativo de victorias, aunque siempre por debajo de «" + prodGanador + "». ";
+        texto += "Entre los principales competidores se encuentran:\n\n";
+
+        otros.forEach(([prod, cnt]) => {
+          const pct = totalFavorables > 0 ? (cnt * 100 / totalFavorables).toFixed(1) : null;
+          texto += "• «" + prod + "» con " + cnt + " resultados favorables";
+          if (pct !== null) {
+            texto += ", lo que representa aproximadamente el " + pct + "% del total de casos favorables";
+          }
+          texto += ".\n";
+        });
+        texto += "\n";
+      }
+
+      texto += "Más allá del simple conteo de victorias, es importante considerar la diversidad de contextos en los que se produce la superioridad. ";
+      texto += "Cada fila corresponde a una combinación específica de MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD. ";
+      texto += "Que un producto aparezca repetidamente como superior sugiere que su formulación es robusta frente a cambios en estas variables.\n\n";
+
+      texto += "En resumen, considerando exclusivamente las filas en las que PRODUCT_TEST demuestra superioridad frente a PRODUCT_BENCH, ";
+      texto += "el análisis pone de manifiesto que «" + prodGanador + "» es el producto con mejor desempeño global en términos de frecuencia de victorias y potencial robustez a través de distintos escenarios.\n";
+
+      return texto;
+    }
+
+    // -------------------------------------------------------------
+    // Modo 2: Blancura por MONITOR
+    // -------------------------------------------------------------
+    function analizarBlancura(statusEl, numericEl, textEl, userPrompt) {
+      const data = {};
+      let totalFilas = 0;
+
+      Papa.parse(csvFile, {
+        header: true,
+        skipEmptyLines: true,
+        worker: false,
+        chunkSize: 1024 * 1024,
+        chunk: function(results) {
+          const rows = results.data;
+          for (const row of rows) {
+            totalFilas++;
+            const monitor = (row["MONITOR"] || "").trim();
+            const product = (row["PRODUCT"] || "").trim();
+            if (!monitor || !product) continue;
+
+            for (const m of whitenessMetrics) {
+              if (!(m in row)) continue;
+              const v = parseFloat(row[m]);
+              if (Number.isNaN(v)) continue;
+
+              if (!data[monitor]) data[monitor] = {};
+              if (!data[monitor][m]) data[monitor][m] = { max: null, rows: [] };
+
+              const entry = data[monitor][m];
+              if (entry.max === null || v > entry.max) {
+                entry.max = v;
+                entry.rows = [{
+                  PRODUCT: product,
+                  MODALITY: row["MODALITY"] || "",
+                  SCENARIOS: row["SCENARIOS"] || "",
+                  WASH: row["WASH"] || "",
+                  PROCESS: row["PROCESS"] || "",
+                  VALUE: v
+                }];
+              } else if (v === entry.max) {
+                entry.rows.push({
+                  PRODUCT: product,
+                  MODALITY: row["MODALITY"] || "",
+                  SCENARIOS: row["SCENARIOS"] || "",
+                  WASH: row["WASH"] || "",
+                  PROCESS: row["PROCESS"] || "",
+                  VALUE: v
+                });
+              }
+            }
+          }
+        },
+        complete: function() {
+          if (!Object.keys(data).length) {
+            statusEl.textContent = "❌ No se encontraron datos válidos de blancura por MONITOR.";
+            numericEl.textContent = "// Sin resultados de métricas de blancura.";
+            textEl.textContent = "// No hay suficientes datos de blancura para generar una conclusión.";
+            return;
+          }
+
+          const globalCounts = {};
+          for (const monitor of Object.keys(data)) {
+            const metricsObj = data[monitor];
+            for (const metric of Object.keys(metricsObj)) {
+              const info = metricsObj[metric];
+              for (const row of info.rows) {
+                const prod = row.PRODUCT || "(VACÍO)";
+                globalCounts[prod] = (globalCounts[prod] || 0) + 1;
+              }
+            }
+          }
+
+          let numTxt = "";
+          numTxt += "Total de filas leídas: " + totalFilas + "\n\n";
+          numTxt += "Máximos de blancura por MONITOR y métrica:\n";
+          for (const monitor of Object.keys(data).sort()) {
+            numTxt += "MONITOR = " + monitor + "\n";
+            const metricsObj = data[monitor];
+            for (const metric of Object.keys(metricsObj)) {
+              const info = metricsObj[metric];
+              numTxt += "  Métrica: " + metric + ", valor máximo: " + info.max + "\n";
+              for (const row of info.rows) {
+                numTxt += "    - PRODUCT = " + row.PRODUCT +
+                          ", MODALITY = " + row.MODALITY +
+                          ", SCENARIOS = " + row.SCENARIOS +
+                          ", WASH = " + row.WASH +
+                          ", PROCESS = " + row.PROCESS + "\n";
+              }
+            }
+            numTxt += "\n";
+          }
+
+          numTxt += "Conteo global de apariciones como máximo de blancura por PRODUCT:\n";
+          const globalSorted = Object.entries(globalCounts).sort((a,b) => b[1] - a[1]);
+          for (const [prod, cnt] of globalSorted) {
+            numTxt += "  - " + prod + ": " + cnt + "\n";
+          }
+
+          numericEl.textContent = numTxt;
+
+          if (openQuestionMode) {
+            generarExplicacionConLLM(
+              numTxt,
+              userPrompt,
+              () => construirExplicacionLargaAbierta(
+                userPrompt,
+                "blancura",
+                {
+                  totalFilas,
+                  detalleMonitores: Object.keys(data).length,
+                  rankingProductosBlancura: globalSorted
+                }
+              )
+            );
+          } else {
+            textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
+          }
+
+          statusEl.textContent = "✅ Análisis de blancura completado.";
+        },
+        error: function(err) {
+          statusEl.textContent = "❌ Error al leer el CSV: " + err;
+          numericEl.textContent = "// Error al procesar el archivo.";
+          textEl.textContent = "";
+        }
+      });
+    }
+
+    function construirExplicacionLargaBlancura(userPrompt, data, globalSorted) {
+      if (!globalSorted.length) {
+        return "// No se pudieron construir patrones globales de blancura.";
+      }
+      const [prodTop, cntTop] = globalSorted[0];
+      const promptIntro = userPrompt
+        ? "El análisis de blancura se ha guiado por la siguiente pregunta: «" +
+          userPrompt.replace(/\s+/g, " ").trim() +
+          "».\n\n"
+        : "En este análisis se ha estudiado el comportamiento de la blancura a partir de los datos del CSV.\n\n";
+
+      let texto = "";
+      texto += promptIntro;
+      texto += "El recuento global de apariciones como máximo de blancura muestra que el producto que más veces lidera es «" + prodTop + "», con " + cntTop + " apariciones entre todas las combinaciones de MONITOR y métricas WI.\n\n";
+      texto += "Este patrón sugiere que la formulación asociada a «" + prodTop + "» tiene una capacidad notable para generar niveles elevados de blancura en condiciones variadas. ";
+      texto += "Al desglosar los resultados por MONITOR, se observa un mosaico de comportamientos donde distintos productos se alternan como máximos según la métrica considerada.\n\n";
+      texto += "En conclusión, «" + prodTop + "» ofrece un mejor desempeño global cuando se consideran simultáneamente los diferentes monitores y las métricas de blancura analizadas.\n";
+      return texto;
+    }
+
+    // -------------------------------------------------------------
+    // Explicación genérica para Pregunta Abierta (fallback)
+    // -------------------------------------------------------------
+    function construirExplicacionLargaAbierta(userPrompt, tipoAnalisis, contexto) {
+      const promptLimpio = (userPrompt || "").replace(/\s+/g," ").trim();
+      let texto = "";
+      texto += "La pregunta libre del usuario fue: «" + promptLimpio + "».\n\n";
+      texto += "El sistema ha utilizado el archivo CSV que cargaste como fuente de evidencia cuantitativa y ha construido indicadores básicos para interpretar tu pregunta.\n\n";
+      texto += "En modo " + tipoAnalisis + " se han calculado resúmenes numéricos que sirven como contexto para cualquier lectura que quieras hacer sobre robustez de productos, frecuencia de victorias o consistencia de la blancura.\n\n";
+      texto += "Al no disponer del Space remoto, esta explicación se genera internamente combinando tu prompt con los patrones que se observan en los datos.\n";
+      return texto;
+    }
+
+    // Inicializar conexión con el Space al cargar
+    window.addEventListener("load", () => {
+      initHFClient();
+    });
+  </script>
+</body>
+</html>
