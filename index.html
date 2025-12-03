@@ -175,49 +175,58 @@
     <h1>CHATBOT para uso de los CSV de Consumertec</h1>
     <p>
       Este chatbot está diseñado para trabajar con archivos <strong>OUTPUT_MAP_COMPARISONS.csv</strong> y
-      otros CSV derivados de los experimentos de Consumertec. Primero se elige el tipo de análisis:
-      (1) comparaciones de <strong>PRODUCT_TEST</strong> frente a <strong>PRODUCT_BENCH</strong> usando la columna RESPONSE,
-      o (2) evaluación de <strong>blancura por MONITOR</strong> usando las métricas WI. Después se sube el CSV
-      correspondiente y se ejecuta el análisis. También existe un modo de <strong>Pregunta Abierta</strong> para escribir
-      cualquier prompt y recibir una respuesta larga basada en los resultados calculados.
+      otros CSV derivados de los experimentos de Consumertec. Primero se elige en la sección 1 uno de los
+      <strong>prompts internos</strong> de análisis (comparaciones, blancura, resumen general o relación
+      de RESPONSE con las demás columnas). Después se sube el CSV correspondiente y se ejecuta el análisis.
+      El sistema genera un resumen numérico y una explicación en texto continuo basada únicamente en los datos
+      del archivo.
     </p>
 
-    <!-- Estado del motor remoto -->
+    <!-- Estado del motor (solo cálculo interno, sin LLM externo) -->
     <div id="llmStatus" class="status small">
-      ℹ️ En modo Pregunta Abierta se usará el Space alexacido/consumertec-llm para generar la explicación larga.
+      ℹ️ Este chatbot utiliza únicamente cálculos internos sobre tu CSV; no se conecta a ningún modelo externo.
     </div>
 
-    <!-- Elegir modo -->
+    <!-- Elegir prompt interno -->
     <div>
-      <div class="section-title">1. Elegir tipo de análisis (check box)</div>
+      <div class="section-title">1. Elegir prompt interno de análisis</div>
+      <p class="small">
+        Selecciona uno de los prompts internos. El sistema cargará automáticamente un texto recomendado
+        en la sección 3 y ajustará el tipo de CSV que se espera en la sección 2.
+      </p>
       <div class="mode-options">
         <label>
-          <input type="radio" name="mode" id="modeComparacion" value="comparaciones"
+          <input type="radio" name="mode" value="comparaciones"
                  onclick="setMode('comparaciones')" />
-          Comparación (PRODUCT_TEST vs RESPONSE)
+          Prompt 1 — Comparación (PRODUCT_TEST vs RESPONSE)
         </label>
         <label>
-          <input type="radio" name="mode" id="modeBlancura" value="whiteness"
+          <input type="radio" name="mode" value="whiteness"
                  onclick="setMode('whiteness')" />
-          Blancura por MONITOR (métricas WI)
+          Prompt 2 — Blancura por MONITOR (métricas WI)
+        </label>
+        <label>
+          <input type="radio" name="mode" value="resumen"
+                 onclick="setMode('resumen')" />
+          Prompt 3 — Resumen general de la tabla
+        </label>
+        <label>
+          <input type="radio" name="mode" value="response_rel"
+                 onclick="setMode('response_rel')" />
+          Prompt 4 — Comparar RESPONSE con las demás columnas
         </label>
       </div>
-      <div class="row" style="margin-top:8px;">
-        <button class="btn secondary" type="button" onclick="activarPreguntaAbierta()">
-          Pregunta Abierta
-        </button>
-      </div>
       <div class="status small" id="modeStatus">
-        Después de elegir el tipo de análisis, se pedirá subir el archivo CSV correcto para ese modo.
-        Si activas Pregunta Abierta, el prompt libre se enviará al Space junto con los resultados numéricos.
+        Después de elegir un prompt interno, se pedirá subir el archivo CSV correcto y se cargará un texto
+        recomendado en la sección 3.
       </div>
     </div>
 
     <!-- Subir CSV -->
     <div>
-      <div class="section-title">2. Subir archivo CSV según el tipo elegido</div>
+      <div class="section-title">2. Subir archivo CSV según el prompt elegido</div>
       <label for="csvInput" id="csvLabel">
-        Primero selecciona el tipo de análisis arriba. Luego podrás subir el CSV correspondiente.
+        Primero selecciona un prompt interno arriba. Luego podrás subir el CSV correspondiente.
       </label>
       <input id="csvInput" type="file" accept=".csv" />
       <div id="fileStatus" class="status">⚠️ Ningún archivo seleccionado.</div>
@@ -225,19 +234,19 @@
 
     <!-- Pregunta / Prompt -->
     <div>
-      <div class="section-title">3. Pregunta / prompt</div>
+      <div class="section-title">3. Prompt de análisis</div>
       <label for="question">
-        Si usas Pregunta Abierta, escribe aquí tu prompt libre (cualquier pregunta respecto a la tabla).
-        Si no, se cargará uno recomendado según el modo.
+        El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente
+        antes de ejecutar el cálculo.
       </label>
-      <textarea id="question" placeholder="Primero elige el tipo de análisis o pulsa Pregunta Abierta para escribir tu prompt..."></textarea>
+      <textarea id="question" placeholder="Primero elige un prompt interno para cargar aquí el texto recomendado…"></textarea>
       <div class="row">
         <button class="btn" type="button" onclick="analizarCSV()">
           4. Analizar CSV
         </button>
       </div>
       <div id="analysisStatus" class="status">
-        ⏳ Esperando que elijas el tipo de análisis, subas el CSV correcto y uses el botón Analizar.
+        ⏳ Esperando que elijas un prompt interno, subas el CSV correcto y uses el botón Analizar.
       </div>
     </div>
 
@@ -257,50 +266,14 @@
       </div>
     </div>
   </div>
-
-  <!-- Lógica: CSV + LLM remoto en Pregunta Abierta -->
-  <script type="module">
-    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
-
-    // -------------------------------------------------------------
-    // Configuración del Space remoto
-    // -------------------------------------------------------------
-    const HF_SPACE_ID = "alexacido/consumertec-llm";
-    const HF_ENDPOINT = "/generate_answer";
-
-    let hfClient = null;
-    let hfReady  = false;
-
-    async function initHFClient() {
-      const llmStatusEl = document.getElementById("llmStatus");
-      try {
-        if (llmStatusEl) {
-          llmStatusEl.textContent = "⏳ Conectando con el Space " + HF_SPACE_ID + "…";
-        }
-        hfClient = await Client.connect(HF_SPACE_ID);
-        hfReady = true;
-        if (llmStatusEl) {
-          llmStatusEl.textContent =
-            "✅ Conectado al Space " + HF_SPACE_ID +
-            ". En Pregunta Abierta se usará el endpoint " + HF_ENDPOINT + ".";
-        }
-      } catch (err) {
-        console.error("Error conectando a Hugging Face Space:", err);
-        hfReady = false;
-        if (llmStatusEl) {
-          llmStatusEl.textContent =
-            "❌ No se pudo conectar al Space. En Pregunta Abierta se usará solo la explicación interna.";
-        }
-      }
-    }
-
+  <!-- Lógica: CSV y análisis interno (sin LLM) -->
+  <script>
     // -------------------------------------------------------------
     // Estado global
     // -------------------------------------------------------------
     let csvFile = null;
     let csvHeaders = null;
-    let analysisMode = null;        // 'comparaciones' o 'whiteness'
-    let openQuestionMode = false;   // true si se pulsa "Pregunta Abierta"
+    let analysisMode = null; // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
 
     const whitenessMetrics = [
       "1.2.WI_STw",
@@ -324,7 +297,7 @@
         csvFile = null;
         csvHeaders = null;
         csvInputEl.value = "";
-        fileStatusEl.textContent = "⚠️ Primero elige el tipo de análisis (Comparación o Blancura).";
+        fileStatusEl.textContent = "⚠️ Primero elige un prompt interno (tipo de análisis).";
         return;
       }
 
@@ -350,11 +323,17 @@
           if (!valid.ok) {
             csvFile = null;
             csvInputEl.value = "";
-            fileStatusEl.textContent = "❌ El archivo no corresponde al modo seleccionado: " + valid.mensaje;
+            fileStatusEl.textContent = "❌ El archivo no corresponde al análisis seleccionado: " + valid.mensaje;
           } else {
             csvFile = file;
-            fileStatusEl.textContent = "✅ Archivo válido para el modo " +
-              (analysisMode === "comparaciones" ? "Comparación" : "Blancura") +
+            fileStatusEl.textContent = "✅ Archivo válido para el análisis " +
+              (analysisMode === "comparaciones"
+                ? "de Comparación"
+                : analysisMode === "whiteness"
+                  ? "de Blancura"
+                  : analysisMode === "resumen"
+                    ? "de Resumen general"
+                    : "de RESPONSE vs otras columnas") +
               ": " + file.name + " (" + formatBytes(file.size) + ")";
           }
         },
@@ -416,25 +395,42 @@
         return { ok: true, mensaje: "" };
       }
 
+      if (mode === "resumen") {
+        // Acepta cualquier CSV con al menos una columna
+        if (!hdr.length) {
+          return { ok: false, mensaje: "el CSV no tiene columnas detectables." };
+        }
+        return { ok: true, mensaje: "" };
+      }
+
+      if (mode === "response_rel") {
+        // Necesita al menos la columna RESPONSE
+        if (!set.has("RESPONSE")) {
+          return {
+            ok: false,
+            mensaje: "no se encuentra la columna RESPONSE, necesaria para este análisis."
+          };
+        }
+        return { ok: true, mensaje: "" };
+      }
+
       return { ok: false, mensaje: "modo de análisis no reconocido." };
     }
 
     // -------------------------------------------------------------
-    // Selección de modo y carga de prompts
+    // Selección de prompt interno (sección 1)
     // -------------------------------------------------------------
     function setModeInternal(mode) {
       analysisMode = mode;
-      openQuestionMode = false;
 
       csvFile = null;
       csvHeaders = null;
       csvInputEl.value = "";
-      fileStatusEl.textContent = "📥 Ahora sube el CSV de " +
-        (mode === "comparaciones" ? "Comparación (PRODUCT_TEST vs RESPONSE)." : "Blancura por MONITOR (métricas WI).");
+      fileStatusEl.textContent = "📥 Ahora sube el CSV para el análisis seleccionado.";
 
       const questionEl = document.getElementById("question");
       questionEl.placeholder =
-        "Prompt oficial cargado para el modo elegido. Puedes ajustarlo si lo deseas…";
+        "Prompt oficial cargado para el análisis elegido. Puedes ajustarlo si lo deseas…";
 
       if (mode === "comparaciones") {
         questionEl.value =
@@ -442,103 +438,27 @@
       } else if (mode === "whiteness") {
         questionEl.value =
 `Para cada uno de los valores únicos de la columna "MONITOR", identifica cuáles son los productos ("PRODUCT") que presentan los valores más altos en cada una de las métricas de blancura: "1.2.WI_STw" (blancura estándar), "2.2.WI_GEw" (blancura verdosa), "3.2.WI_VOw" (blancura violácea) y "4.2.WI_LGw" (blancura luminosa). Para cada caso, indica en qué combinaciones específicas de las variables "MODALITY", "SCENARIOS", "WASH" y "PROCESS" se presentan esos valores máximos. Luego, compara entre los distintos productos dentro de cada tipo de monitor, resaltando si algún producto se destaca de forma consistente en más de una métrica o en múltiples combinaciones. Finalmente, resume qué productos muestran un mejor desempeño global de blancura en función del tipo de monitor utilizado, considerando la frecuencia con la que aparecen con los valores más altos y la diversidad de condiciones en las que lo hacen.`;
+      } else if (mode === "resumen") {
+        questionEl.value =
+`Haz un resumen general de la tabla del CSV, describiendo cuántas filas y columnas contiene, qué tipo de información parece dominar (columnas numéricas frente a categóricas) y cómo se distribuyen los valores. Menciona, de forma interpretativa, cuáles son las columnas que parecen más relevantes o más variadas y qué patrones generales se pueden intuir solamente a partir de los recuentos y de los rangos de valores. La explicación debe ir en texto continuo, sin listas, destacando las ideas principales sobre la estructura y el contenido de la tabla.`;
+      } else if (mode === "response_rel") {
+        questionEl.value =
+`Compara la distribución de los valores de la columna RESPONSE con lo que ocurre en el resto de columnas del CSV. Identifica qué valores de RESPONSE son más frecuentes y, para cada uno de ellos, describe qué patrones se observan en las columnas principales (productos, monitores, modalidades, escenarios, procesos, etc.). Explica de forma narrativa si hay combinaciones de valores que aparezcan más asociadas a determinados resultados de RESPONSE, resaltando las tendencias más claras que puedan deducirse únicamente de los recuentos.`;
       }
 
+      let modoTexto = "";
+      if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE.";
+      else if (mode === "whiteness") modoTexto = "Blancura por MONITOR (métricas WI).";
+      else if (mode === "resumen") modoTexto = "Resumen general de la tabla.";
+      else if (mode === "response_rel") modoTexto = "Comparar RESPONSE con las demás columnas.";
+
       modeStatusEl.textContent =
-        "✅ Tipo de análisis seleccionado: " +
-        (mode === "comparaciones"
-          ? "Comparación PRODUCT_TEST vs RESPONSE (usa prompt interno)."
-          : "Blancura por MONITOR (usa prompt interno).");
+        "✅ Prompt interno seleccionado: " + modoTexto;
       csvLabelEl.textContent =
-        "Sube ahora el CSV correspondiente al modo seleccionado (" +
-        (mode === "comparaciones" ? "Comparación" : "Blancura") + ").";
+        "Sube ahora el CSV correspondiente al análisis seleccionado.";
     }
 
     window.setMode = setModeInternal;
-
-    // -------------------------------------------------------------
-    // Activar Pregunta Abierta (usa LLM remoto)
-    // -------------------------------------------------------------
-    function activarPreguntaAbierta() {
-      openQuestionMode = true;
-      const qEl = document.getElementById("question");
-      qEl.value = "";
-      qEl.placeholder =
-        "Modo Pregunta Abierta activado. Escribe aquí cualquier prompt o pregunta sobre los datos del CSV…";
-      modeStatusEl.textContent =
-        "📝 Modo Pregunta Abierta: el prompt se enviará al Space alexacido/consumertec-llm junto con los resultados numéricos. Las respuestas internas quedan en pausa.";
-    }
-
-    window.activarPreguntaAbierta = activarPreguntaAbierta;
-
-    // -------------------------------------------------------------
-    // Llamada al Space en Pregunta Abierta
-    // -------------------------------------------------------------
-    async function generarExplicacionConLLM(contextoNumerico, promptUsuario, fallbackBuilder) {
-      const textEl = document.getElementById("textOutput");
-      const llmStatusEl = document.getElementById("llmStatus");
-      if (!textEl) return;
-
-      const promptFinal =
-        "Eres un analista senior de datos de Consumertec. Recibes un contexto numérico calculado a partir de un CSV y una pregunta o prompt del usuario.\n" +
-        "Debes responder con un texto claro y estructurado en español, explicando las conclusiones y destacando patrones importantes.\n\n" +
-        "=== CONTEXTO NUMÉRICO ===\n" +
-        contextoNumerico +
-        "\n\n=== PREGUNTA / PROMPT DEL USUARIO ===\n" +
-        (promptUsuario || "(sin prompt explícito)") + "\n";
-
-      if (!hfReady || !hfClient) {
-        textEl.textContent = fallbackBuilder();
-        if (llmStatusEl) {
-          llmStatusEl.textContent =
-            "ℹ️ Space no disponible. Se usó explicación interna en Pregunta Abierta.";
-        }
-        return;
-      }
-
-      textEl.textContent =
-        "⏳ Generando explicación con el Space " +
-        HF_SPACE_ID + " (endpoint " + HF_ENDPOINT + ")…tardara minimo 5 minutos";
-
-      try {
-        const result = await hfClient.predict(HF_ENDPOINT, [promptFinal]);
-
-        let answer = "";
-        if (Array.isArray(result?.data)) {
-          answer = result.data[0];
-        } else if (typeof result?.data === "string") {
-          answer = result.data;
-        } else if (result?.data != null) {
-          answer = JSON.stringify(result.data, null, 2);
-        }
-
-        if (!answer || !String(answer).trim()) {
-          textEl.textContent =
-            "⚠️ El Space no devolvió texto utilizable. Se muestra explicación interna.\n\n" +
-            fallbackBuilder();
-          if (llmStatusEl) {
-            llmStatusEl.textContent =
-              "⚠️ Respuesta vacía del Space. Usando explicación interna.";
-          }
-        } else {
-          textEl.textContent = answer;
-          if (llmStatusEl) {
-            llmStatusEl.textContent =
-              "✅ Explicación generada por el Space " + HF_SPACE_ID + ".";
-          }
-        }
-      } catch (err) {
-        console.error("Error llamando al Space:", err);
-        textEl.textContent =
-          "❌ Error al usar el Space. Se muestra explicación interna.\n\n" +
-          fallbackBuilder();
-        if (llmStatusEl) {
-          llmStatusEl.textContent =
-            "❌ Error en la llamada al Space. Usando explicación interna.";
-        }
-      }
-    }
-
     // -------------------------------------------------------------
     // Botón principal: analizar CSV
     // -------------------------------------------------------------
@@ -549,28 +469,34 @@
       const question = document.getElementById("question").value.trim();
 
       if (!analysisMode) {
-        statusEl.textContent = "⚠️ Primero elige el tipo de análisis (Comparación o Blancura).";
+        statusEl.textContent = "⚠️ Primero elige un prompt interno (tipo de análisis).";
         return;
       }
       if (!csvFile) {
-        statusEl.textContent = "⚠️ Sube el archivo CSV correcto para el modo seleccionado.";
-        return;
-      }
-      if (openQuestionMode && !question) {
-        statusEl.textContent = "⚠️ Estás en Pregunta Abierta. Escribe un prompt.";
+        statusEl.textContent = "⚠️ Sube el archivo CSV correcto para el análisis seleccionado.";
         return;
       }
 
       statusEl.textContent = "⏳ Analizando CSV en modo: " +
-        (analysisMode === "whiteness" ? "BLANCURA" : "COMPARACIONES") + "…";
+        (analysisMode === "whiteness"
+          ? "BLANCURA"
+          : analysisMode === "comparaciones"
+            ? "COMPARACIONES"
+            : analysisMode === "resumen"
+              ? "RESUMEN GENERAL"
+              : "RESPONSE vs OTRAS COLUMNAS") + "…";
 
       numericEl.textContent = "// Procesando CSV, esto puede tardar para archivos grandes…";
       textEl.textContent = "// Preparando explicación…";
 
       if (analysisMode === "whiteness") {
         analizarBlancura(statusEl, numericEl, textEl, question);
-      } else {
+      } else if (analysisMode === "comparaciones") {
         analizarComparaciones(statusEl, numericEl, textEl, question);
+      } else if (analysisMode === "resumen") {
+        analizarResumen(statusEl, numericEl, textEl, question);
+      } else if (analysisMode === "response_rel") {
+        analizarResponseVsOtros(statusEl, numericEl, textEl, question);
       }
     }
 
@@ -623,30 +549,13 @@
           }
           numericEl.textContent = numTxt;
 
-          if (openQuestionMode) {
-            generarExplicacionConLLM(
-              numTxt,
-              userPrompt,
-              () => construirExplicacionLargaAbierta(
-                userPrompt,
-                "comparaciones",
-                {
-                  totalFilas,
-                  totalFiltradas,
-                  totalFavorables,
-                  ranking: ordenados
-                }
-              )
-            );
-          } else {
-            textEl.textContent = construirExplicacionLargaComparaciones(
-              userPrompt,
-              ordenados,
-              totalFilas,
-              totalFiltradas,
-              totalFavorables
-            );
-          }
+          textEl.textContent = construirExplicacionLargaComparaciones(
+            userPrompt,
+            ordenados,
+            totalFilas,
+            totalFiltradas,
+            totalFavorables
+          );
 
           statusEl.textContent = "✅ Análisis de comparaciones completado.";
         },
@@ -812,23 +721,7 @@
 
           numericEl.textContent = numTxt;
 
-          if (openQuestionMode) {
-            generarExplicacionConLLM(
-              numTxt,
-              userPrompt,
-              () => construirExplicacionLargaAbierta(
-                userPrompt,
-                "blancura",
-                {
-                  totalFilas,
-                  detalleMonitores: Object.keys(data).length,
-                  rankingProductosBlancura: globalSorted
-                }
-              )
-            );
-          } else {
-            textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
-          }
+          textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
 
           statusEl.textContent = "✅ Análisis de blancura completado.";
         },
@@ -846,38 +739,372 @@
       }
       const [prodTop, cntTop] = globalSorted[0];
       const promptIntro = userPrompt
-        ? "El análisis de blancura se ha guiado por la siguiente pregunta: «" +
+        ? "El análisis de blancura se ha guiado por la siguiente pregunta o enfoque: «" +
           userPrompt.replace(/\s+/g, " ").trim() +
           "».\n\n"
         : "En este análisis se ha estudiado el comportamiento de la blancura a partir de los datos del CSV.\n\n";
 
       let texto = "";
       texto += promptIntro;
-      texto += "El recuento global de apariciones como máximo de blancura muestra que el producto que más veces lidera es «" + prodTop + "», con " + cntTop + " apariciones entre todas las combinaciones de MONITOR y métricas WI.\n\n";
+      texto += "A partir de las métricas de blancura asociadas a cada MONITOR, se identificaron los valores máximos de las distintas métricas WI en función de las combinaciones de producto, modalidad de lavado, escenario de suciedad y proceso. ";
+      texto += "El recuento global de apariciones como máximo de blancura muestra que el producto que más veces lidera es «" + prodTop + "», con " + cntTop + " apariciones entre todas las combinaciones de MONITOR y métricas de blancura consideradas.\n\n";
+
       texto += "Este patrón sugiere que la formulación asociada a «" + prodTop + "» tiene una capacidad notable para generar niveles elevados de blancura en condiciones variadas. ";
-      texto += "Al desglosar los resultados por MONITOR, se observa un mosaico de comportamientos donde distintos productos se alternan como máximos según la métrica considerada.\n\n";
-      texto += "En conclusión, «" + prodTop + "» ofrece un mejor desempeño global cuando se consideran simultáneamente los diferentes monitores y las métricas de blancura analizadas.\n";
+      texto += "Aunque otros productos también alcanzan en ocasiones los valores máximos en determinados monitores o métricas, la frecuencia con la que «" + prodTop + "» aparece como referencia indica una ventaja global en términos de consistencia.\n\n";
+
+      texto += "Al desglosar los resultados por monitor, se observa que cada sistema de evaluación aporta matices distintos: algunos monitores pueden ser más sensibles a diferencias de matiz verdoso o violáceo, mientras que otros ponen más énfasis en la blancura luminosa o estándar. ";
+      texto += "El hecho de que un mismo producto destaque repetidamente en diferentes monitores y métricas refuerza la idea de una blancura percibida más sólida en un rango amplio de condiciones.\n\n";
+
+      texto += "En conjunto, y siempre dentro de los límites del CSV analizado, los datos apuntan a que «" + prodTop + "» ofrece un mejor desempeño global cuando se consideran simultáneamente los distintos monitores y las métricas de blancura estudiadas. ";
+      texto += "Otros productos pueden mostrar picos de rendimiento en contextos concretos, pero ninguno parece igualar la combinación de frecuencia y diversidad de situaciones en las que «" + prodTop + "» se sitúa en la parte alta del ranking de blancura.\n";
+
       return texto;
     }
+    // -------------------------------------------------------------
+    // Modo 3: Resumen general de la tabla
+    // -------------------------------------------------------------
+    function analizarResumen(statusEl, numericEl, textEl, userPrompt) {
+      const stats = {};
+      let totalFilas = 0;
+      let headersLocal = null;
 
-    // -------------------------------------------------------------
-    // Explicación genérica para Pregunta Abierta (fallback)
-    // -------------------------------------------------------------
-    function construirExplicacionLargaAbierta(userPrompt, tipoAnalisis, contexto) {
-      const promptLimpio = (userPrompt || "").replace(/\s+/g," ").trim();
+      Papa.parse(csvFile, {
+        header: true,
+        skipEmptyLines: true,
+        worker: false,
+        chunkSize: 1024 * 1024,
+        chunk: function(results) {
+          const rows = results.data;
+          if (!headersLocal) {
+            headersLocal = results.meta && results.meta.fields ? results.meta.fields : [];
+          }
+          for (const row of rows) {
+            totalFilas++;
+            for (const col of Object.keys(row)) {
+              if (!stats[col]) {
+                stats[col] = {
+                  numericCount: 0,
+                  nonNumericCount: 0,
+                  sum: 0,
+                  min: null,
+                  max: null,
+                  categories: {}
+                };
+              }
+              const valRaw = row[col];
+              if (valRaw === null || valRaw === undefined) continue;
+              const val = String(valRaw).trim();
+              if (val === "") continue;
+
+              const num = parseFloat(val.replace(",", "."));
+              if (!Number.isNaN(num) && val.match(/^[+-]?(\d+(\.\d+)?|\.\d+)$/)) {
+                // Numérico "limpio"
+                stats[col].numericCount++;
+                stats[col].sum += num;
+                if (stats[col].min === null || num < stats[col].min) stats[col].min = num;
+                if (stats[col].max === null || num > stats[col].max) stats[col].max = num;
+              } else {
+                stats[col].nonNumericCount++;
+                stats[col].categories[val] = (stats[col].categories[val] || 0) + 1;
+              }
+            }
+          }
+        },
+        complete: function() {
+          if (!headersLocal || !headersLocal.length) {
+            statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
+            numericEl.textContent = "// Sin información estructural disponible.";
+            textEl.textContent = "// No hay suficiente información para generar un resumen.";
+            return;
+          }
+
+          const numCols = headersLocal.length;
+          let numTxt = "";
+          numTxt += "Total de filas leídas: " + totalFilas + "\n";
+          numTxt += "Total de columnas detectadas: " + numCols + "\n\n";
+
+          numTxt += "Resumen por columna:\n";
+          headersLocal.forEach(col => {
+            const s = stats[col] || {
+              numericCount: 0, nonNumericCount: 0,
+              sum: 0, min: null, max: null, categories: {}
+            };
+            const esNumerica = s.numericCount > 0 && s.nonNumericCount === 0;
+            numTxt += "Columna: " + col + "\n";
+            if (esNumerica) {
+              const mean = s.numericCount > 0 ? (s.sum / s.numericCount) : null;
+              numTxt += "  Tipo: numérica\n";
+              numTxt += "  Valores válidos: " + s.numericCount + "\n";
+              if (s.min !== null && s.max !== null) {
+                numTxt += "  Rango aproximado: [" + s.min + ", " + s.max + "]\n";
+              }
+              if (mean !== null) {
+                numTxt += "  Promedio aproximado: " + mean + "\n";
+              }
+            } else {
+              const cats = Object.entries(s.categories);
+              numTxt += "  Tipo: categórica / mixta\n";
+              numTxt += "  Valores no vacíos: " + (s.numericCount + s.nonNumericCount) + "\n";
+              numTxt += "  Nº de categorías distintas: " + cats.length + "\n";
+              if (cats.length) {
+                const topCats = cats.sort((a,b) => b[1]-a[1]).slice(0,5);
+                numTxt += "  Categorías más frecuentes:\n";
+                topCats.forEach(([v,c]) => {
+                  numTxt += "    - " + v + " (" + c + " ocurrencias)\n";
+                });
+              }
+            }
+            numTxt += "\n";
+          });
+
+          numericEl.textContent = numTxt;
+
+          textEl.textContent = construirExplicacionLargaResumen(
+            userPrompt,
+            totalFilas,
+            headersLocal,
+            stats
+          );
+
+          statusEl.textContent = "✅ Resumen general completado.";
+        },
+        error: function(err) {
+          statusEl.textContent = "❌ Error al leer el CSV: " + err;
+          numericEl.textContent = "// Error al procesar el archivo.";
+          textEl.textContent = "";
+        }
+      });
+    }
+
+    function construirExplicacionLargaResumen(userPrompt, totalFilas, headersLocal, stats) {
+      const promptIntro = userPrompt
+        ? "El resumen se ha elaborado tomando como referencia la siguiente instrucción: «" +
+          userPrompt.replace(/\s+/g," ").trim() + "».\n\n"
+        : "A continuación se presenta un resumen general de la estructura y el contenido del CSV analizado.\n\n";
+
       let texto = "";
-      texto += "La pregunta libre del usuario fue: «" + promptLimpio + "».\n\n";
-      texto += "El sistema ha utilizado el archivo CSV que cargaste como fuente de evidencia cuantitativa y ha construido indicadores básicos para interpretar tu pregunta.\n\n";
-      texto += "En modo " + tipoAnalisis + " se han calculado resúmenes numéricos que sirven como contexto para cualquier lectura que quieras hacer sobre robustez de productos, frecuencia de victorias o consistencia de la blancura.\n\n";
-      texto += "Al no disponer del Space remoto, esta explicación se genera internamente combinando tu prompt con los patrones que se observan en los datos.\n";
+      texto += promptIntro;
+      texto += "La tabla analizada contiene un total de " + totalFilas + " filas y " +
+               headersLocal.length + " columnas, lo que ya sugiere un volumen de información suficiente como para identificar patrones y variaciones entre distintos campos.\n\n";
+
+      // Clasificar columnas numéricas vs categóricas/mixtas
+      const colsNumericas = [];
+      const colsCateg = [];
+      headersLocal.forEach(col => {
+        const s = stats[col];
+        if (!s) return;
+        const esNumerica = s.numericCount > 0 && s.nonNumericCount === 0;
+        if (esNumerica) colsNumericas.push(col);
+        else colsCateg.push(col);
+      });
+
+      if (colsNumericas.length > 0) {
+        texto += "En cuanto a variables numéricas, se identifican columnas como ";
+        texto += "«" + colsNumericas.slice(0,4).join("», «") + "»";
+        if (colsNumericas.length > 4) {
+          texto += " y otras más, que completan un conjunto de " + colsNumericas.length + " columnas de carácter cuantitativo. ";
+        } else {
+          texto += ", que en conjunto conforman el núcleo de información numérica de la tabla. ";
+        }
+        texto += "Estas columnas permiten estimar rangos, promedios y posibles diferencias entre productos, escenarios o procesos, según la naturaleza específica de cada campo.\n\n";
+      }
+
+      if (colsCateg.length > 0) {
+        texto += "Por el lado de las variables categóricas o mixtas, aparecen columnas como ";
+        texto += "«" + colsCateg.slice(0,4).join("», «") + "»";
+        if (colsCateg.length > 4) {
+          texto += " y varias más, que aportan etiquetas y clasificaciones clave para interpretar los resultados numéricos. ";
+        } else {
+          texto += ", que sirven como ejes de segmentación para organizar la información de la tabla. ";
+        }
+        texto += "En estas columnas suelen concentrarse códigos de producto, tipos de monitor, modalidades de lavado, escenarios de suciedad o procesos, lo que permite dividir la información en grupos comparables.\n\n";
+      }
+
+      texto += "Si se observa el comportamiento interno de cada columna, se aprecia que algunas presentan una gran diversidad de categorías, mientras que otras se concentran en unos pocos valores recurrentes. ";
+      texto += "Las columnas con muchas categorías distintas pueden estar capturando una variedad amplia de situaciones o combinaciones experimentales, mientras que aquellas con pocos valores dominantes indican focos claros de interés o configuraciones repetidas a lo largo del experimento.\n\n";
+
+      texto += "En términos generales, la estructura de la tabla ofrece un equilibrio entre campos numéricos y categóricos, lo que facilita la construcción de indicadores agregados (promedios, máximos, rangos) y, al mismo tiempo, la segmentación por tipo de producto, monitor o escenario. ";
+      texto += "Este equilibrio es especialmente útil en contextos de evaluación comparativa, donde no solo importa el valor numérico aislado, sino también el contexto experimental en el que se obtiene.\n\n";
+
+      texto += "De este modo, el CSV no solo actúa como un contenedor de resultados, sino como un mapa donde cada columna añade una capa distinta de significado: unas cuantifican el desempeño, otras describen las condiciones de prueba y otras organizan las observaciones en familias coherentes. ";
+      texto += "La combinación de todas ellas permite construir lecturas más ricas sobre el comportamiento de los productos y sobre cómo cambian los resultados al modificar los distintos factores del experimento.\n";
+
       return texto;
     }
 
-    // Inicializar conexión con el Space al cargar
-    window.addEventListener("load", () => {
-      initHFClient();
-    });
+    // -------------------------------------------------------------
+    // Modo 4: Comparar RESPONSE con las demás columnas
+    // -------------------------------------------------------------
+    function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt) {
+      const responseCounts = {};
+      const responseColumnCounts = {};
+      let totalFilas = 0;
+      let headersLocal = null;
+
+      Papa.parse(csvFile, {
+        header: true,
+        skipEmptyLines: true,
+        worker: false,
+        chunkSize: 1024 * 1024,
+        chunk: function(results) {
+          const rows = results.data;
+          if (!headersLocal) {
+            headersLocal = results.meta && results.meta.fields ? results.meta.fields : [];
+          }
+          for (const row of rows) {
+            totalFilas++;
+            const rRaw = row["RESPONSE"];
+            const resp = (rRaw === undefined || rRaw === null || String(rRaw).trim() === "")
+              ? "(VACÍO)" : String(rRaw).trim();
+            responseCounts[resp] = (responseCounts[resp] || 0) + 1;
+
+            for (const col of headersLocal) {
+              if (col === "RESPONSE") continue;
+              const vRaw = row[col];
+              const val = (vRaw === undefined || vRaw === null || String(vRaw).trim() === "")
+                ? "(VACÍO)" : String(vRaw).trim();
+
+              if (!responseColumnCounts[col]) responseColumnCounts[col] = {};
+              if (!responseColumnCounts[col][resp]) responseColumnCounts[col][resp] = {};
+              responseColumnCounts[col][resp][val] =
+                (responseColumnCounts[col][resp][val] || 0) + 1;
+            }
+          }
+        },
+        complete: function() {
+          if (!headersLocal || !headersLocal.length) {
+            statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
+            numericEl.textContent = "// Sin información estructural disponible.";
+            textEl.textContent = "// No hay suficiente información para analizar RESPONSE.";
+            return;
+          }
+
+          const sortedResponses = Object.entries(responseCounts).sort((a,b) => b[1]-a[1]);
+
+          let numTxt = "";
+          numTxt += "Total de filas leídas: " + totalFilas + "\n\n";
+          numTxt += "Distribución de la columna RESPONSE:\n";
+          sortedResponses.forEach(([r,c]) => {
+            const pct = totalFilas > 0 ? (c*100/totalFilas).toFixed(2) + "%" : "–";
+            numTxt += "  - " + r + ": " + c + " filas (" + pct + ")\n";
+          });
+          numTxt += "\n";
+
+          numTxt += "Asociaciones entre RESPONSE y el resto de columnas (primeras 6 columnas distintas de RESPONSE):\n";
+          const colsAnalizar = headersLocal.filter(c => c !== "RESPONSE").slice(0,6);
+
+          const resumenColumnas = [];
+
+          colsAnalizar.forEach(col => {
+            const byResp = responseColumnCounts[col] || {};
+            numTxt += "\nColumna: " + col + "\n";
+            const perResponseTop = {};
+            sortedResponses.forEach(([resp, _cntR]) => {
+              const mapaValores = byResp[resp];
+              if (!mapaValores) return;
+              const sortedVals = Object.entries(mapaValores).sort((a,b) => b[1]-a[1]).slice(0,3);
+              if (!sortedVals.length) return;
+              perResponseTop[resp] = sortedVals;
+
+              numTxt += "  RESPONSE = " + resp + ":\n";
+              sortedVals.forEach(([v,c]) => {
+                numTxt += "    - " + v + " (" + c + " filas)\n";
+              });
+            });
+            resumenColumnas.push({ columna: col, perResponseTop });
+          });
+
+          numericEl.textContent = numTxt;
+
+          textEl.textContent = construirExplicacionLargaResponseRel(
+            userPrompt,
+            totalFilas,
+            sortedResponses,
+            resumenColumnas
+          );
+
+          statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado.";
+        },
+        error: function(err) {
+          statusEl.textContent = "❌ Error al leer el CSV: " + err;
+          numericEl.textContent = "// Error al procesar el archivo.";
+          textEl.textContent = "";
+        }
+      });
+    }
+
+    function construirExplicacionLargaResponseRel(
+      userPrompt,
+      totalFilas,
+      sortedResponses,
+      resumenColumnas
+    ) {
+      const promptIntro = userPrompt
+        ? "El análisis de la relación entre RESPONSE y el resto de columnas se ha guiado por la instrucción: «" +
+          userPrompt.replace(/\s+/g," ").trim() + "».\n\n"
+        : "En este apartado se explora cómo se distribuye RESPONSE y qué asociaciones se observan con las demás columnas del CSV.\n\n";
+
+      let texto = "";
+      texto += promptIntro;
+
+      if (!sortedResponses.length) {
+        texto += "En la práctica, no se han encontrado valores informativos en la columna RESPONSE, por lo que no es posible establecer patrones claros frente al resto de columnas.\n";
+        return texto;
+      }
+
+      const [respTop, cntTop] = sortedResponses[0];
+      const pctTop = totalFilas > 0 ? (cntTop*100/totalFilas).toFixed(1) : null;
+
+      texto += "Al observar la distribución general, la columna RESPONSE se reparte en varios valores posibles, pero el que domina con mayor peso es «" + respTop + "», que reúne " + cntTop + " filas";
+      if (pctTop !== null) {
+        texto += ", lo que equivale aproximadamente al " + pctTop + "% del total de registros";
+      }
+      texto += ". El resto de valores de RESPONSE aparece con menor frecuencia, conformando una cola de resultados menos habituales que también contribuyen a matizar la lectura global.\n\n";
+
+      if (sortedResponses.length > 1) {
+        const segundas = sortedResponses.slice(1,3);
+        if (segundas.length) {
+          texto += "Además de este valor dominante, se identifican otros resultados de RESPONSE que, aunque menos frecuentes, reúnen un número apreciable de casos. ";
+          texto += "Entre ellos destacan ";
+          texto += segundas.map(([r,c]) => "«" + r + "» (" + c + " filas)").join(" y ");
+          texto += ", que completan el mapa de respuestas posibles en el experimento.\n\n";
+        }
+      }
+
+      if (!resumenColumnas.length) {
+        texto += "Al relacionar RESPONSE con el resto de columnas, no se han encontrado patrones suficientemente claros como para destacar asociaciones específicas, posiblemente debido a la dispersión de los datos o a la diversidad de valores. ";
+        texto += "Aun así, la distribución global de RESPONSE ya permite intuir qué resultados se repiten con mayor insistencia en el conjunto de ensayos.\n";
+        return texto;
+      }
+
+      texto += "Cuando se cruza RESPONSE con otras columnas clave de la tabla, comienzan a aparecer patrones más concretos. ";
+      texto += "Cada columna actúa como un eje de segmentación que permite ver qué combinaciones de valores se repiten con mayor frecuencia para cada tipo de respuesta.\n\n";
+
+      const columnasComentadas = resumenColumnas.slice(0,3);
+      columnasComentadas.forEach(colInfo => {
+        const colName = colInfo.columna;
+        const perResponseTop = colInfo.perResponseTop || {};
+        texto += "En la columna «" + colName + "», las distribuciones por RESPONSE muestran que:\n";
+
+        const respuestasComentadas = Object.entries(perResponseTop).slice(0,2);
+        if (!respuestasComentadas.length) {
+          texto += "  No se observan concentraciones claras asociadas a valores específicos de RESPONSE en esta columna.\n\n";
+          return;
+        }
+
+        respuestasComentadas.forEach(([respVal, topVals]) => {
+          if (!topVals || !topVals.length) return;
+          const lista = topVals.map(([v,c]) => "«" + v + "» (" + c + " filas)").join(", ");
+          texto += "  Para RESPONSE = «" + respVal + "» predominan valores como " + lista + ".\n";
+        });
+        texto += "\n";
+      });
+
+      texto += "En conjunto, estas asociaciones no deben interpretarse como relaciones causales directas, pero sí como indicios de que ciertos contextos (definidos por productos, monitores, modalidades o escenarios) tienden a coincidir con determinados resultados de RESPONSE con mayor frecuencia que otros. ";
+      texto += "Esto convierte a RESPONSE en una especie de indicador de salida que resume el efecto combinado de todas esas columnas, y a los patrones detectados en un punto de partida útil para explorar con más detalle qué configuraciones experimentales están detrás de los mejores y peores desempeños.\n";
+
+      return texto;
+    }
   </script>
 </body>
 </html>
-
