@@ -176,10 +176,10 @@
     <p>
       Este chatbot está diseñado para trabajar con archivos <strong>OUTPUT_MAP_COMPARISONS.csv</strong> y
       otros CSV derivados de los experimentos de Consumertec. Primero se elige en la sección 1 uno de los
-      <strong>prompts internos</strong> de análisis (comparaciones, blancura, resumen general o relación
-      de RESPONSE con las demás columnas). Después se sube el CSV correspondiente y se ejecuta el análisis.
-      El sistema genera un resumen numérico y una explicación en texto continuo basada únicamente en los datos
-      del archivo.
+      <strong>prompts internos</strong> de análisis (comparaciones, blancura, resumen general, relación
+      de RESPONSE con las demás columnas o sus variantes avanzadas). Después se sube el CSV correspondiente
+      y se ejecuta el análisis. El sistema genera un resumen numérico y una explicación en texto continuo
+      basada únicamente en los datos del archivo.
     </p>
 
     <!-- Estado del motor (solo cálculo interno, sin LLM externo) -->
@@ -195,25 +195,52 @@
         en la sección 3 y ajustará el tipo de CSV que se espera en la sección 2.
       </p>
       <div class="mode-options">
+        <!-- Grupo Comparaciones -->
         <label>
-          <input type="radio" name="mode" value="comparaciones"
-                 onclick="setMode('comparaciones')" />
+          <input type="radio" name="mode"
+                 onclick="setMode('comparaciones','comparaciones_basico')" />
           Prompt 1 — Comparación (PRODUCT_TEST vs RESPONSE)
         </label>
         <label>
-          <input type="radio" name="mode" value="whiteness"
-                 onclick="setMode('whiteness')" />
+          <input type="radio" name="mode"
+                 onclick="setMode('comparaciones','comparaciones_escenarios')" />
+          Prompt 5 — Comparación por escenarios y modalidades
+        </label>
+
+        <!-- Grupo Blancura -->
+        <label>
+          <input type="radio" name="mode"
+                 onclick="setMode('whiteness','whiteness_basico')" />
           Prompt 2 — Blancura por MONITOR (métricas WI)
         </label>
         <label>
-          <input type="radio" name="mode" value="resumen"
-                 onclick="setMode('resumen')" />
+          <input type="radio" name="mode"
+                 onclick="setMode('whiteness','whiteness_productos')" />
+          Prompt 6 — Perfil de blancura por producto
+        </label>
+
+        <!-- Grupo Resumen -->
+        <label>
+          <input type="radio" name="mode"
+                 onclick="setMode('resumen','resumen_basico')" />
           Prompt 3 — Resumen general de la tabla
         </label>
         <label>
-          <input type="radio" name="mode" value="response_rel"
-                 onclick="setMode('response_rel')" />
+          <input type="radio" name="mode"
+                 onclick="setMode('resumen','resumen_avanzado')" />
+          Prompt 7 — Resumen avanzado y bloques de variables
+        </label>
+
+        <!-- Grupo RESPONSE vs otras columnas -->
+        <label>
+          <input type="radio" name="mode"
+                 onclick="setMode('response_rel','response_basico')" />
           Prompt 4 — Comparar RESPONSE con las demás columnas
+        </label>
+        <label>
+          <input type="radio" name="mode"
+                 onclick="setMode('response_rel','response_extremos')" />
+          Prompt 8 — RESPONSE: mejores y peores resultados
         </label>
       </div>
       <div class="status small" id="modeStatus">
@@ -273,7 +300,8 @@
     // -------------------------------------------------------------
     let csvFile = null;
     let csvHeaders = null;
-    let analysisMode = null; // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
+    let analysisMode = null;       // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
+    let currentPromptKey = null;   // identifica el prompt específico dentro de cada modo
 
     const whitenessMetrics = [
       "1.2.WI_STw",
@@ -326,15 +354,16 @@
             fileStatusEl.textContent = "❌ El archivo no corresponde al análisis seleccionado: " + valid.mensaje;
           } else {
             csvFile = file;
-            fileStatusEl.textContent = "✅ Archivo válido para el análisis " +
+            const etiquetaModo =
               (analysisMode === "comparaciones"
                 ? "de Comparación"
                 : analysisMode === "whiteness"
                   ? "de Blancura"
                   : analysisMode === "resumen"
                     ? "de Resumen general"
-                    : "de RESPONSE vs otras columnas") +
-              ": " + file.name + " (" + formatBytes(file.size) + ")";
+                    : "de RESPONSE vs otras columnas");
+            fileStatusEl.textContent = "✅ Archivo válido para el análisis " +
+              etiquetaModo + ": " + file.name + " (" + formatBytes(file.size) + ")";
           }
         },
         error: function(err) {
@@ -420,8 +449,9 @@
     // -------------------------------------------------------------
     // Selección de prompt interno (sección 1)
     // -------------------------------------------------------------
-    function setModeInternal(mode) {
+    function setModeInternal(mode, promptKey) {
       analysisMode = mode;
+      currentPromptKey = promptKey || mode;
 
       csvFile = null;
       csvHeaders = null;
@@ -432,24 +462,45 @@
       questionEl.placeholder =
         "Prompt oficial cargado para el análisis elegido. Puedes ajustarlo si lo deseas…";
 
+      // --- TEXTOS DE LOS PROMPTS SEGÚN MODO + VARIANTE ---
       if (mode === "comparaciones") {
-        questionEl.value =
+        if (currentPromptKey === "comparaciones_basico") {
+          questionEl.value =
 `Analiza el archivo OUTPUT_MAP_COMPARISONS.csv para identificar cuál es el producto con mejor desempeño general. Para ello, toma en cuenta únicamente las comparaciones en las que la columna RESPONSE tenga los valores 01.SUPERIOR o 02.SUPERIOR_TREND, que indican un resultado favorable para PRODUCT_TEST frente a PRODUCT_BENCH. Evalúa cuántas veces cada valor de PRODUCT_TEST alcanza un resultado superior en todas las combinaciones posibles de las columnas MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD. El producto que más veces obtenga resultados favorables según estos dos valores de RESPONSE debe ser considerado como el de mejor desempeño. La conclusión debe presentarse en texto continuo, indicando claramente cuál es el producto con mejor rendimiento y por qué, basándose en la frecuencia con la que obtiene un desempeño superior en las comparaciones.`;
+        } else if (currentPromptKey === "comparaciones_escenarios") {
+          questionEl.value =
+`Analiza el archivo OUTPUT_MAP_COMPARISONS.csv poniendo el foco en cómo cambia el desempeño de los distintos PRODUCT_TEST según las columnas MODALITY, SCENARIOS, WASH y PROCESS. Identifica para cada una de estas columnas qué productos tienden a concentrar más respuestas 01.SUPERIOR y 02.SUPERIOR_TREND, señalando si hay formulaciones especialmente fuertes en determinados escenarios o modalidades y si existen contextos donde el rendimiento se reparte de forma más equilibrada. La explicación debe ser en texto continuo, resaltando las combinaciones producto–escenario más robustas y aquellas donde las diferencias entre productos parecen menos marcadas.`;
+        }
       } else if (mode === "whiteness") {
-        questionEl.value =
+        if (currentPromptKey === "whiteness_basico") {
+          questionEl.value =
 `Para cada uno de los valores únicos de la columna "MONITOR", identifica cuáles son los productos ("PRODUCT") que presentan los valores más altos en cada una de las métricas de blancura: "1.2.WI_STw" (blancura estándar), "2.2.WI_GEw" (blancura verdosa), "3.2.WI_VOw" (blancura violácea) y "4.2.WI_LGw" (blancura luminosa). Para cada caso, indica en qué combinaciones específicas de las variables "MODALITY", "SCENARIOS", "WASH" y "PROCESS" se presentan esos valores máximos. Luego, compara entre los distintos productos dentro de cada tipo de monitor, resaltando si algún producto se destaca de forma consistente en más de una métrica o en múltiples combinaciones. Finalmente, resume qué productos muestran un mejor desempeño global de blancura en función del tipo de monitor utilizado, considerando la frecuencia con la que aparecen con los valores más altos y la diversidad de condiciones en las que lo hacen.`;
+        } else if (currentPromptKey === "whiteness_productos") {
+          questionEl.value =
+`Utiliza los datos de blancura del CSV para construir un perfil de cada "PRODUCT" en términos de las métricas "1.2.WI_STw", "2.2.WI_GEw", "3.2.WI_VOw" y "4.2.WI_LGw" a través de todos los "MONITOR" disponibles. Describe en texto continuo qué productos se ubican con mayor frecuencia en los valores máximos de blancura, cuáles parecen más equilibrados entre varias métricas y cuáles destacan solo en una dimensión específica (por ejemplo, más verdosa o más luminosa). Indica también si hay productos que cambian mucho su posición relativa según el monitor utilizado, y qué implicaciones tiene esto para la lectura global de blancura.`;
+        }
       } else if (mode === "resumen") {
-        questionEl.value =
+        if (currentPromptKey === "resumen_basico") {
+          questionEl.value =
 `Haz un resumen general de la tabla del CSV, describiendo cuántas filas y columnas contiene, qué tipo de información parece dominar (columnas numéricas frente a categóricas) y cómo se distribuyen los valores. Menciona, de forma interpretativa, cuáles son las columnas que parecen más relevantes o más variadas y qué patrones generales se pueden intuir solamente a partir de los recuentos y de los rangos de valores. La explicación debe ir en texto continuo, sin listas, destacando las ideas principales sobre la estructura y el contenido de la tabla.`;
+        } else if (currentPromptKey === "resumen_avanzado") {
+          questionEl.value =
+`Elabora un resumen avanzado de la tabla combinando la descripción estructural (número de filas, columnas y tipos de variables) con una lectura más interpretativa de qué grupos de columnas parecen estar relacionados entre sí. Sin realizar inferencias causales, comenta qué bloques de variables pueden agruparse (por ejemplo, columnas de contexto experimental frente a columnas de resultados) y cómo podrían utilizarse en análisis posteriores más específicos. La explicación debe ser narrativa, destacando las conexiones más plausibles sólo a partir de la estructura y de los recuentos.`;
+        }
       } else if (mode === "response_rel") {
-        questionEl.value =
+        if (currentPromptKey === "response_basico") {
+          questionEl.value =
 `Compara la distribución de los valores de la columna RESPONSE con lo que ocurre en el resto de columnas del CSV. Identifica qué valores de RESPONSE son más frecuentes y, para cada uno de ellos, describe qué patrones se observan en las columnas principales (productos, monitores, modalidades, escenarios, procesos, etc.). Explica de forma narrativa si hay combinaciones de valores que aparezcan más asociadas a determinados resultados de RESPONSE, resaltando las tendencias más claras que puedan deducirse únicamente de los recuentos.`;
+        } else if (currentPromptKey === "response_extremos") {
+          questionEl.value =
+`Profundiza en la columna RESPONSE distinguiendo claramente entre los resultados más favorables y los menos favorables. Para cada grupo (por ejemplo, valores que representan superioridad, empate o inferioridad), describe qué patrones se observan en las columnas de producto, monitor, modalidad y escenario. Explica en texto continuo qué combinaciones parecen asociarse con respuestas especialmente buenas y cuáles tienden a concentrar los peores resultados, utilizando únicamente recuentos y frecuencias obtenidos del CSV.`;
+        }
       }
 
       let modoTexto = "";
       if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE.";
       else if (mode === "whiteness") modoTexto = "Blancura por MONITOR (métricas WI).";
-      else if (mode === "resumen") modoTexto = "Resumen general de la tabla.";
+      else if (mode === "resumen") modoTexto = "Resumen general / avanzado de la tabla.";
       else if (mode === "response_rel") modoTexto = "Comparar RESPONSE con las demás columnas.";
 
       modeStatusEl.textContent =
@@ -459,6 +510,7 @@
     }
 
     window.setMode = setModeInternal;
+
     // -------------------------------------------------------------
     // Botón principal: analizar CSV
     // -------------------------------------------------------------
@@ -483,7 +535,7 @@
           : analysisMode === "comparaciones"
             ? "COMPARACIONES"
             : analysisMode === "resumen"
-              ? "RESUMEN GENERAL"
+              ? "RESUMEN GENERAL / AVANZADO"
               : "RESPONSE vs OTRAS COLUMNAS") + "…";
 
       numericEl.textContent = "// Procesando CSV, esto puede tardar para archivos grandes…";
@@ -866,7 +918,7 @@
             stats
           );
 
-          statusEl.textContent = "✅ Resumen general completado.";
+          statusEl.textContent = "✅ Resumen general / avanzado completado.";
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
