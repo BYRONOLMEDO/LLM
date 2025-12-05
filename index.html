@@ -147,9 +147,22 @@
     }
     .mode-options{
       display:flex;
-      gap:12px;
+      flex-direction:column;
+      gap:8px;
       margin-top:4px;
       flex-wrap:wrap;
+    }
+    .mode-group{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+    }
+    .mode-group.hidden{
+      display:none;
+    }
+    .mode-group.disabled{
+      opacity:0.3;
+      pointer-events:none;
     }
     .mode-options label{
       display:flex;
@@ -175,11 +188,12 @@
     <h1>CHATBOT para uso de los CSV de Consumertec</h1>
     <p>
       Este chatbot está diseñado para trabajar con archivos <strong>OUTPUT_MAP_COMPARISONS.csv</strong> y
-      otros CSV derivados de los experimentos de Consumertec. Primero se elige en la sección 1 uno de los
-      <strong>prompts internos</strong> de análisis (comparaciones, blancura, resumen general, relación
-      de RESPONSE con las demás columnas o sus variantes avanzadas). Después se sube el CSV correspondiente
-      y se ejecuta el análisis. El sistema genera un resumen numérico y una explicación en texto continuo
-      basada únicamente en los datos del archivo.
+      otros CSV derivados de los experimentos de Consumertec. Primero se <strong>sube en la sección 1</strong>
+      el archivo CSV que se desea analizar. A partir de su estructura, en la <strong>sección 2</strong> se
+      activan los <strong>prompts internos</strong> compatibles (comparaciones, blancura, resumen general,
+      relación de RESPONSE con las demás columnas o sus variantes avanzadas). Después se ejecuta el análisis:
+      el sistema genera un resumen numérico y una explicación en texto continuo basada únicamente en los datos
+      del archivo.
     </p>
 
     <!-- Estado del motor (solo cálculo interno, sin LLM externo) -->
@@ -187,76 +201,86 @@
       ℹ️ Este chatbot utiliza únicamente cálculos internos sobre tu CSV; no se conecta a ningún modelo externo.
     </div>
 
-    <!-- Elegir prompt interno -->
+    <!-- Subir CSV (ahora SECCIÓN 1) -->
     <div>
-      <div class="section-title">1. Elegir prompt interno de análisis</div>
-      <p class="small">
-        Selecciona uno de los prompts internos. El sistema cargará automáticamente un texto recomendado
-        en la sección 3 y ajustará el tipo de CSV que se espera en la sección 2.
-      </p>
-      <div class="mode-options">
-        <!-- Grupo Comparaciones -->
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('comparaciones','comparaciones_basico')" />
-          Prompt 1 — Comparación (PRODUCT_TEST vs RESPONSE)
-        </label>
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('comparaciones','comparaciones_escenarios')" />
-          Prompt 5 — Comparación por escenarios y modalidades
-        </label>
-
-        <!-- Grupo Blancura -->
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('whiteness','whiteness_basico')" />
-          Prompt 2 — Blancura por MONITOR (métricas WI)
-        </label>
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('whiteness','whiteness_productos')" />
-          Prompt 6 — Perfil de blancura por producto
-        </label>
-
-        <!-- Grupo Resumen -->
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('resumen','resumen_basico')" />
-          Prompt 3 — Resumen general de la tabla
-        </label>
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('resumen','resumen_avanzado')" />
-          Prompt 7 — Resumen avanzado y bloques de variables
-        </label>
-
-        <!-- Grupo RESPONSE vs otras columnas -->
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('response_rel','response_basico')" />
-          Prompt 4 — Comparar RESPONSE con las demás columnas
-        </label>
-        <label>
-          <input type="radio" name="mode"
-                 onclick="setMode('response_rel','response_extremos')" />
-          Prompt 8 — RESPONSE: mejores y peores resultados
-        </label>
-      </div>
-      <div class="status small" id="modeStatus">
-        Después de elegir un prompt interno, se pedirá subir el archivo CSV correcto y se cargará un texto
-        recomendado en la sección 3.
-      </div>
-    </div>
-
-    <!-- Subir CSV -->
-    <div>
-      <div class="section-title">2. Subir archivo CSV según el prompt elegido</div>
+      <div class="section-title">1. Subir archivo CSV</div>
       <label for="csvInput" id="csvLabel">
-        Primero selecciona un prompt interno arriba. Luego podrás subir el CSV correspondiente.
+        Sube primero el CSV que quieres analizar. Según sus columnas, se activarán las opciones de análisis en la sección 2.
       </label>
       <input id="csvInput" type="file" accept=".csv" />
       <div id="fileStatus" class="status">⚠️ Ningún archivo seleccionado.</div>
+    </div>
+
+    <!-- Elegir tipo de análisis + prompt interno (ahora SECCIÓN 2) -->
+    <div>
+      <div class="section-title">2. Elegir tipo de análisis y prompt interno</div>
+      <p class="small">
+        Después de subir el CSV, se mostrarán aquí los tipos de análisis compatibles. Cada tipo activa sus
+        prompts internos. Al elegir uno, se cargará automáticamente un texto recomendado en la sección 3,
+        que puedes editar libremente.
+      </p>
+
+      <div class="mode-options">
+        <!-- Grupo Comparaciones -->
+        <div id="group_comparaciones" class="mode-group hidden">
+          <label>
+            <input id="mode_comparaciones_basico" type="radio" name="mode"
+                   onclick="setMode('comparaciones','comparaciones_basico')" />
+            Prompt 1 — Comparación (PRODUCT_TEST vs RESPONSE)
+          </label>
+          <label>
+            <input id="mode_comparaciones_escenarios" type="radio" name="mode"
+                   onclick="setMode('comparaciones','comparaciones_escenarios')" />
+            Prompt 5 — Comparación por escenarios y modalidades
+          </label>
+        </div>
+
+        <!-- Grupo Blancura -->
+        <div id="group_whiteness" class="mode-group hidden">
+          <label>
+            <input id="mode_whiteness_basico" type="radio" name="mode"
+                   onclick="setMode('whiteness','whiteness_basico')" />
+            Prompt 2 — Blancura por MONITOR (métricas WI)
+          </label>
+          <label>
+            <input id="mode_whiteness_productos" type="radio" name="mode"
+                   onclick="setMode('whiteness','whiteness_productos')" />
+            Prompt 6 — Perfil de blancura por producto
+          </label>
+        </div>
+
+        <!-- Grupo Resumen -->
+        <div id="group_resumen" class="mode-group hidden">
+          <label>
+            <input id="mode_resumen_basico" type="radio" name="mode"
+                   onclick="setMode('resumen','resumen_basico')" />
+            Prompt 3 — Resumen general de la tabla
+          </label>
+          <label>
+            <input id="mode_resumen_avanzado" type="radio" name="mode"
+                   onclick="setMode('resumen','resumen_avanzado')" />
+            Prompt 7 — Resumen avanzado y bloques de variables
+          </label>
+        </div>
+
+        <!-- Grupo RESPONSE vs otras columnas -->
+        <div id="group_response_rel" class="mode-group hidden">
+          <label>
+            <input id="mode_response_basico" type="radio" name="mode"
+                   onclick="setMode('response_rel','response_basico')" />
+            Prompt 4 — Comparar RESPONSE con las demás columnas
+          </label>
+          <label>
+            <input id="mode_response_extremos" type="radio" name="mode"
+                   onclick="setMode('response_rel','response_extremos')" />
+            Prompt 8 — RESPONSE: mejores y peores resultados
+          </label>
+        </div>
+      </div>
+
+      <div class="status small" id="modeStatus">
+        Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.
+      </div>
     </div>
 
     <!-- Pregunta / Prompt -->
@@ -266,14 +290,14 @@
         El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente
         antes de ejecutar el cálculo.
       </label>
-      <textarea id="question" placeholder="Primero elige un prompt interno para cargar aquí el texto recomendado…"></textarea>
+      <textarea id="question" placeholder="Primero sube un CSV y luego elige un tipo de análisis para cargar aquí el texto recomendado…"></textarea>
       <div class="row">
         <button class="btn" type="button" onclick="analizarCSV()">
           4. Analizar CSV
         </button>
       </div>
       <div id="analysisStatus" class="status">
-        ⏳ Esperando que elijas un prompt interno, subas el CSV correcto y uses el botón Analizar.
+        ⏳ Sube un CSV, elige un tipo de análisis en la sección 2 y luego usa el botón Analizar.
       </div>
     </div>
 
@@ -303,6 +327,14 @@
     let analysisMode = null;       // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
     let currentPromptKey = null;   // identifica el prompt específico dentro de cada modo
 
+    // Tipos de análisis detectados como compatibles con el CSV subido
+    const tiposDisponibles = {
+      comparaciones: false,
+      whiteness: false,
+      resumen: false,
+      response_rel: false
+    };
+
     const whitenessMetrics = [
       "1.2.WI_STw",
       "2.2.WI_GEw",
@@ -316,23 +348,90 @@
     const modeStatusEl = document.getElementById("modeStatus");
 
     // -------------------------------------------------------------
-    // Manejo de subida de archivo (validación por modo)
+    // Utilidad: actualizar visibilidad de grupos de prompts
+    // -------------------------------------------------------------
+    function actualizarDisponibilidadPrompts() {
+      const groupCompar = document.getElementById("group_comparaciones");
+      const groupWhite  = document.getElementById("group_whiteness");
+      const groupRes    = document.getElementById("group_resumen");
+      const groupResp   = document.getElementById("group_response_rel");
+
+      // Comparaciones
+      if (tiposDisponibles.comparaciones) {
+        groupCompar.classList.remove("hidden");
+      } else {
+        groupCompar.classList.add("hidden");
+      }
+
+      // Blancura
+      if (tiposDisponibles.whiteness) {
+        groupWhite.classList.remove("hidden");
+      } else {
+        groupWhite.classList.add("hidden");
+      }
+
+      // Resumen (siempre que el CSV tenga al menos una columna)
+      if (tiposDisponibles.resumen) {
+        groupRes.classList.remove("hidden");
+      } else {
+        groupRes.classList.add("hidden");
+      }
+
+      // RESPONSE vs otras columnas (solo si existe RESPONSE)
+      if (tiposDisponibles.response_rel) {
+        groupResp.classList.remove("hidden");
+      } else {
+        groupResp.classList.add("hidden");
+      }
+
+      // Mensaje de ayuda
+      const activos = [];
+      if (tiposDisponibles.comparaciones) activos.push("Comparaciones PRODUCT_TEST vs RESPONSE");
+      if (tiposDisponibles.whiteness)     activos.push("Blancura por MONITOR (métricas WI)");
+      if (tiposDisponibles.resumen)      activos.push("Resumen general / avanzado");
+      if (tiposDisponibles.response_rel) activos.push("RESPONSE vs otras columnas");
+
+      if (!csvFile) {
+        modeStatusEl.textContent =
+          "Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.";
+      } else if (!activos.length) {
+        modeStatusEl.textContent =
+          "CSV cargado, pero no se detectó ninguna configuración estándar de análisis. Solo será posible un resumen básico.";
+      } else {
+        modeStatusEl.textContent =
+          "CSV cargado. Tipos de análisis disponibles: " + activos.join(" • ") +
+          ". Elige uno para que se cargue el prompt recomendado en la sección 3.";
+      }
+    }
+
+    // Inicializar (sin CSV aún)
+    actualizarDisponibilidadPrompts();
+
+    // -------------------------------------------------------------
+    // Manejo de subida de archivo (detecta tipos compatibles)
     // -------------------------------------------------------------
     csvInputEl.addEventListener("change", (ev) => {
       const file = ev.target.files && ev.target.files[0];
 
-      if (!analysisMode) {
-        csvFile = null;
-        csvHeaders = null;
-        csvInputEl.value = "";
-        fileStatusEl.textContent = "⚠️ Primero elige un prompt interno (tipo de análisis).";
-        return;
-      }
+      // Limpiar selección de modo al cambiar de CSV
+      analysisMode = null;
+      currentPromptKey = null;
+      document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+
+      const questionEl = document.getElementById("question");
+      questionEl.value = "";
+      questionEl.placeholder =
+        "Tras subir el CSV y elegir un tipo de análisis compatible, aquí se cargará el prompt recomendado…";
 
       if (!file) {
         csvFile = null;
         csvHeaders = null;
         fileStatusEl.textContent = "⚠️ Ningún archivo seleccionado.";
+        tiposDisponibles.comparaciones = false;
+        tiposDisponibles.whiteness = false;
+        tiposDisponibles.resumen = false;
+        tiposDisponibles.response_rel = false;
+        actualizarDisponibilidadPrompts();
         return;
       }
 
@@ -346,31 +445,46 @@
         complete: function(results) {
           const headers = results.meta && results.meta.fields ? results.meta.fields : [];
           csvHeaders = headers;
-          const valid = validarHeadersPorModo(analysisMode, headers);
 
-          if (!valid.ok) {
-            csvFile = null;
-            csvInputEl.value = "";
-            fileStatusEl.textContent = "❌ El archivo no corresponde al análisis seleccionado: " + valid.mensaje;
-          } else {
-            csvFile = file;
-            const etiquetaModo =
-              (analysisMode === "comparaciones"
-                ? "de Comparación"
-                : analysisMode === "whiteness"
-                  ? "de Blancura"
-                  : analysisMode === "resumen"
-                    ? "de Resumen general"
-                    : "de RESPONSE vs otras columnas");
-            fileStatusEl.textContent = "✅ Archivo válido para el análisis " +
-              etiquetaModo + ": " + file.name + " (" + formatBytes(file.size) + ")";
-          }
+          // Detectar compatibilidad para cada modo usando la misma lógica interna
+          const validCompar   = validarHeadersPorModo("comparaciones", headers);
+          const validWhite    = validarHeadersPorModo("whiteness", headers);
+          const validResumen  = validarHeadersPorModo("resumen", headers);
+          const validRespRel  = validarHeadersPorModo("response_rel", headers);
+
+          tiposDisponibles.comparaciones = !!validCompar.ok;
+          tiposDisponibles.whiteness     = !!validWhite.ok;
+          tiposDisponibles.resumen       = !!validResumen.ok;
+          tiposDisponibles.response_rel  = !!validRespRel.ok;
+
+          csvFile = file;
+
+          const disponibles = [];
+          if (validCompar.ok)  disponibles.push("Comparación PRODUCT_TEST vs RESPONSE");
+          if (validWhite.ok)   disponibles.push("Blancura por MONITOR (métricas WI)");
+          if (validRespRel.ok) disponibles.push("RESPONSE vs otras columnas");
+          if (validResumen.ok) disponibles.push("Resumen general / avanzado");
+
+          fileStatusEl.textContent =
+            "✅ CSV cargado: " + file.name + " (" + formatBytes(file.size) + "). " +
+            (disponibles.length
+              ? "Análisis posibles: " + disponibles.join(" • ") + "."
+              : "Solo será posible un resumen básico de la tabla.");
+
+          csvLabelEl.textContent =
+            "Archivo CSV cargado. Si lo deseas, puedes cambiarlo por otro. Ahora elige en la sección 2 el tipo de análisis.";
+
+          actualizarDisponibilidadPrompts();
         },
         error: function(err) {
           csvFile = null;
           csvHeaders = null;
-          csvInputEl.value = "";
           fileStatusEl.textContent = "❌ Error al leer el CSV: " + err;
+          tiposDisponibles.comparaciones = false;
+          tiposDisponibles.whiteness = false;
+          tiposDisponibles.resumen = false;
+          tiposDisponibles.response_rel = false;
+          actualizarDisponibilidadPrompts();
         }
       });
     });
@@ -447,16 +561,45 @@
     }
 
     // -------------------------------------------------------------
-    // Selección de prompt interno (sección 1)
+    // Selección de prompt interno (sección 2)
     // -------------------------------------------------------------
     function setModeInternal(mode, promptKey) {
+      // Debe existir un CSV primero
+      if (!csvFile) {
+        modeStatusEl.textContent =
+          "⚠️ Primero sube un CSV en la sección 1. Después podrás elegir el tipo de análisis.";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+        return;
+      }
+
+      // Verificar que el modo es compatible con el CSV actual
+      if (mode === "comparaciones" && !tiposDisponibles.comparaciones) {
+        modeStatusEl.textContent =
+          "❌ El archivo cargado no tiene las columnas necesarias para análisis de Comparaciones (PRODUCT_TEST / RESPONSE).";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+        return;
+      }
+      if (mode === "whiteness" && !tiposDisponibles.whiteness) {
+        modeStatusEl.textContent =
+          "❌ El archivo cargado no corresponde a un formato de Blancura (MONITOR, PRODUCT y métricas WI).";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+        return;
+      }
+      if (mode === "resumen" && !tiposDisponibles.resumen) {
+        modeStatusEl.textContent =
+          "❌ El archivo no parece tener estructura válida para un resumen general.";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+        return;
+      }
+      if (mode === "response_rel" && !tiposDisponibles.response_rel) {
+        modeStatusEl.textContent =
+          "❌ El archivo cargado no contiene la columna RESPONSE, necesaria para este análisis.";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+        return;
+      }
+
       analysisMode = mode;
       currentPromptKey = promptKey || mode;
-
-      csvFile = null;
-      csvHeaders = null;
-      csvInputEl.value = "";
-      fileStatusEl.textContent = "📥 Ahora sube el CSV para el análisis seleccionado.";
 
       const questionEl = document.getElementById("question");
       questionEl.placeholder =
@@ -505,8 +648,6 @@
 
       modeStatusEl.textContent =
         "✅ Prompt interno seleccionado: " + modoTexto;
-      csvLabelEl.textContent =
-        "Sube ahora el CSV correspondiente al análisis seleccionado.";
     }
 
     window.setMode = setModeInternal;
@@ -520,12 +661,12 @@
       const textEl = document.getElementById("textOutput");
       const question = document.getElementById("question").value.trim();
 
-      if (!analysisMode) {
-        statusEl.textContent = "⚠️ Primero elige un prompt interno (tipo de análisis).";
+      if (!csvFile) {
+        statusEl.textContent = "⚠️ Sube primero el archivo CSV en la sección 1.";
         return;
       }
-      if (!csvFile) {
-        statusEl.textContent = "⚠️ Sube el archivo CSV correcto para el análisis seleccionado.";
+      if (!analysisMode) {
+        statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2.";
         return;
       }
 
@@ -812,6 +953,7 @@
 
       return texto;
     }
+
     // -------------------------------------------------------------
     // Modo 3: Resumen general de la tabla
     // -------------------------------------------------------------
