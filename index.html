@@ -325,7 +325,7 @@
       </div>
     </div>
   </div>
-  <!-- Lógica: CSV + análisis interno + LLM para Pregunta Abierta -->
+   <!-- Lógica: CSV + análisis interno + LLM para Pregunta Abierta -->
   <script>
     // ============================================================
     //  Backend LLM (FastAPI en Hugging Face)
@@ -655,7 +655,7 @@
     window.setMode = setModeInternal;
 
     // -------------------------------------------------------------
-    // Pregunta Abierta: activa LLM con resumen numérico
+    // Pregunta Abierta: activa LLM manteniendo el modo numérico
     // -------------------------------------------------------------
     function activarPreguntaAbierta() {
       const llmStatusEl = document.getElementById("llmStatus");
@@ -667,23 +667,31 @@
         return;
       }
 
-      // Marcar Pregunta Abierta y limpiar selección de radio buttons
       openQuestionMode = true;
-      analysisMode = "resumen";        // usaremos el análisis de resumen para la sección 5
-      currentPromptKey = "resumen_abierto";
 
-      document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+      // Si NO hay modo elegido todavía, usamos RESUMEN como fallback.
+      const teniaModoPrevio = !!analysisMode;
+      if (!teniaModoPrevio) {
+        analysisMode = "resumen";
+        currentPromptKey = "resumen_abierto";
+        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+      }
 
       questionEl.value = "";
       questionEl.placeholder =
-        "Modo Pregunta Abierta: escribe aquí tu pregunta o enfoque. Se generará un resumen numérico en la sección 5 y la sección 6 vendrá del LLM externo.";
+        "Modo Pregunta Abierta: escribe aquí tu pregunta o enfoque. Se generará el resumen numérico interno en la sección 5 y la sección 6 vendrá del LLM externo.";
 
-      modeStatusEl.textContent =
-        "📝 Pregunta Abierta activada: se usará un resumen general del CSV (sección 5) y el LLM responderá en la sección 6.";
+      if (teniaModoPrevio) {
+        modeStatusEl.textContent =
+          "📝 Pregunta Abierta activada sobre el modo actual: la sección 5 usará el mismo cálculo interno y la sección 6 será generada por el LLM.";
+      } else {
+        modeStatusEl.textContent =
+          "📝 Pregunta Abierta activada (modo resumen): se usará un resumen general del CSV (sección 5) y el LLM responderá en la sección 6.";
+      }
 
       if (llmStatusEl) {
         llmStatusEl.textContent =
-          "✅ Pregunta Abierta: el frontend calculará el resumen numérico y lo enviará junto con tu texto al backend /generate_answer.";
+          "✅ Pregunta Abierta: se mantiene el cálculo numérico interno de la sección 5 y ese resumen se envía al backend /generate_answer para construir la sección 6.";
       }
     }
 
@@ -770,24 +778,36 @@
         return;
       }
 
-      // Si estamos en Pregunta Abierta forzamos modo resumen+LLM
       if (openQuestionMode) {
-        analysisMode = "resumen";
+        // En Pregunta Abierta siempre necesitamos una pregunta
         if (!question) {
           statusEl.textContent = "⚠️ En Pregunta Abierta debes escribir una pregunta o enfoque en la sección 3.";
           return;
+        }
+        // Si aún no había modo (caso: solo Pregunta Abierta), ya se fijó a 'resumen' en activarPreguntaAbierta().
+        if (!analysisMode) {
+          analysisMode = "resumen";
+          currentPromptKey = "resumen_abierto";
         }
       } else if (!analysisMode) {
         statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2 o usa Pregunta Abierta.";
         return;
       }
 
+      const usarBackendLLM = openQuestionMode;
+
       let modoTxt = "";
-      if (openQuestionMode) modoTxt = "RESUMEN + LLM (Pregunta Abierta)";
-      else if (analysisMode === "whiteness") modoTxt = "BLANCURA (interno)";
-      else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES (interno)";
-      else if (analysisMode === "resumen") modoTxt = "RESUMEN (interno, sin LLM)";
-      else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS (interno)";
+      if (usarBackendLLM) {
+        if (analysisMode === "whiteness") modoTxt = "BLANCURA + LLM (Pregunta Abierta)";
+        else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES + LLM (Pregunta Abierta)";
+        else if (analysisMode === "resumen") modoTxt = "RESUMEN + LLM (Pregunta Abierta)";
+        else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS + LLM (Pregunta Abierta)";
+      } else {
+        if (analysisMode === "whiteness") modoTxt = "BLANCURA (interno)";
+        else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES (interno)";
+        else if (analysisMode === "resumen") modoTxt = "RESUMEN (interno, sin LLM)";
+        else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS (interno)";
+      }
 
       statusEl.textContent = "⏳ Analizando CSV en modo: " + modoTxt + "…";
 
@@ -795,24 +815,24 @@
       textEl.textContent = "// Preparando explicación…";
 
       if (analysisMode === "whiteness") {
-        analizarBlancura(statusEl, numericEl, textEl, question);
+        analizarBlancura(statusEl, numericEl, textEl, question, usarBackendLLM);
       } else if (analysisMode === "comparaciones") {
-        analizarComparaciones(statusEl, numericEl, textEl, question);
+        analizarComparaciones(statusEl, numericEl, textEl, question, usarBackendLLM);
       } else if (analysisMode === "resumen") {
-        // usarBackendLLM = true solo si Pregunta Abierta está activa
-        const usarBackendLLM = openQuestionMode;
         analizarResumen(statusEl, numericEl, textEl, question, usarBackendLLM);
       } else if (analysisMode === "response_rel") {
-        analizarResponseVsOtros(statusEl, numericEl, textEl, question);
+        analizarResponseVsOtros(statusEl, numericEl, textEl, question, usarBackendLLM);
       }
     }
 
     window.analizarCSV = analizarCSVInternal;
 
     // -------------------------------------------------------------
-    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (interno)
+    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE
+    //   - Interno normal
+    //   - O con LLM si usarBackendLLM = true (sección 5 igual, sección 6 = LLM)
     // -------------------------------------------------------------
-    function analizarComparaciones(statusEl, numericEl, textEl, userPrompt) {
+    function analizarComparaciones(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
       const conteos = {};
       let totalFilas = 0;
@@ -854,17 +874,25 @@
             const pct = totalFavorables > 0 ? (cnt * 100 / totalFavorables).toFixed(2) + "%" : "–";
             numTxt += "  - " + prod + ": " + cnt + " (" + pct + " de los favorables)\n";
           }
+
+          // 👉 Sección 5 SIEMPRE usa este cálculo interno, con o sin Pregunta Abierta
           numericEl.textContent = numTxt;
 
-          textEl.textContent = construirExplicacionLargaComparaciones(
-            userPrompt,
-            ordenados,
-            totalFilas,
-            totalFiltradas,
-            totalFavorables
-          );
-
-          statusEl.textContent = "✅ Análisis de comparaciones completado (interno).";
+          if (usarBackendLLM) {
+            // Sección 6 desde el LLM, usando el mismo resumen numérico de comparaciones
+            pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
+            statusEl.textContent = "✅ Análisis de comparaciones numérico generado. Esperando respuesta del LLM en la sección 6…";
+          } else {
+            // Explicación interna
+            textEl.textContent = construirExplicacionLargaComparaciones(
+              userPrompt,
+              ordenados,
+              totalFilas,
+              totalFiltradas,
+              totalFavorables
+            );
+            statusEl.textContent = "✅ Análisis de comparaciones completado (interno).";
+          }
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -874,7 +902,6 @@
       });
     }
 
-    // 👉 CAMBIO: ya NO se repite el prompt, intro genérica
     function construirExplicacionLargaComparaciones(
       userPrompt,
       ordenados,
@@ -929,9 +956,11 @@
     }
 
     // -------------------------------------------------------------
-    // Modo 2: Blancura por MONITOR (interno)
+    // Modo 2: Blancura por MONITOR
+    //   - Interno normal
+    //   - O con LLM si usarBackendLLM = true
     // -------------------------------------------------------------
-    function analizarBlancura(statusEl, numericEl, textEl, userPrompt) {
+    function analizarBlancura(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const data = {};
       let totalFilas = 0;
 
@@ -1026,11 +1055,16 @@
             numTxt += "  - " + prod + ": " + cnt + "\n";
           }
 
+          // 👉 Sección 5 SIEMPRE interno
           numericEl.textContent = numTxt;
 
-          textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
-
-          statusEl.textContent = "✅ Análisis de blancura completado (interno).";
+          if (usarBackendLLM) {
+            pedirExplicacionDesdeBackend(userPrompt, numTxt, "whiteness");
+            statusEl.textContent = "✅ Análisis de blancura numérico generado. Esperando respuesta del LLM en la sección 6…";
+          } else {
+            textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
+            statusEl.textContent = "✅ Análisis de blancura completado (interno).";
+          }
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -1040,7 +1074,6 @@
       });
     }
 
-    // 👉 CAMBIO: intro genérica, sin repetir prompt
     function construirExplicacionLargaBlancura(userPrompt, data, globalSorted) {
       if (!globalSorted.length) {
         return "// No se pudieron construir patrones globales de blancura.";
@@ -1070,7 +1103,7 @@
     // -------------------------------------------------------------
     // Modo 3: Resumen general de la tabla
     //   - Interno normal
-    //   - O con LLM cuando openQuestionMode = true (usarBackendLLM = true)
+    //   - O con LLM cuando usarBackendLLM = true
     // -------------------------------------------------------------
     function analizarResumen(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const stats = {};
@@ -1165,14 +1198,13 @@
             numTxt += "\n";
           });
 
+          // 👉 Sección 5 SIEMPRE el mismo resumen interno
           numericEl.textContent = numTxt;
 
           if (usarBackendLLM) {
-            // Pregunta Abierta: usamos el backend LLM con el resumen numérico
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "resumen");
             statusEl.textContent = "✅ Resumen numérico generado. Esperando respuesta del LLM en la sección 6…";
           } else {
-            // Modo interno normal
             textEl.textContent = construirExplicacionLargaResumen(
               userPrompt,
               totalFilas,
@@ -1190,7 +1222,6 @@
       });
     }
 
-    // 👉 CAMBIO: intro genérica, sin citar el prompt
     function construirExplicacionLargaResumen(userPrompt, totalFilas, headersLocal, stats) {
       const promptIntro =
         "A continuación se presenta un resumen general de la estructura y el contenido del CSV analizado.\n\n";
@@ -1245,9 +1276,11 @@
     }
 
     // -------------------------------------------------------------
-    // Modo 4: Comparar RESPONSE con las demás columnas (interno)
+    // Modo 4: Comparar RESPONSE con las demás columnas
+    //   - Interno normal
+    //   - O con LLM cuando usarBackendLLM = true
     // -------------------------------------------------------------
-    function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt) {
+    function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const responseCounts = {};
       const responseColumnCounts = {};
       let totalFilas = 0;
@@ -1326,16 +1359,21 @@
             resumenColumnas.push({ columna: col, perResponseTop });
           });
 
+          // 👉 Sección 5 SIEMPRE interna
           numericEl.textContent = numTxt;
 
-          textEl.textContent = construirExplicacionLargaResponseRel(
-            userPrompt,
-            totalFilas,
-            sortedResponses,
-            resumenColumnas
-          );
-
-          statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado (interno).";
+          if (usarBackendLLM) {
+            pedirExplicacionDesdeBackend(userPrompt, numTxt, "response_rel");
+            statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas (numérico) generado. Esperando respuesta del LLM en la sección 6…";
+          } else {
+            textEl.textContent = construirExplicacionLargaResponseRel(
+              userPrompt,
+              totalFilas,
+              sortedResponses,
+              resumenColumnas
+            );
+            statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado (interno).";
+          }
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -1345,7 +1383,6 @@
       });
     }
 
-    // 👉 CAMBIO: intro genérica, sin repetir el texto del prompt
     function construirExplicacionLargaResponseRel(
       userPrompt,
       totalFilas,
@@ -1417,5 +1454,5 @@
       return texto;
     }
   </script>
-</body>
+    </body>
 </html>
