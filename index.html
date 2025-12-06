@@ -192,16 +192,16 @@
       el archivo CSV que se desea analizar. A partir de su estructura, en la <strong>sección 2</strong> se
       activan los <strong>prompts internos</strong> compatibles (comparaciones, blancura, resumen general,
       relación de RESPONSE con las demás columnas o sus variantes avanzadas). Después se ejecuta el análisis:
-      el sistema genera un resumen numérico y una explicación en texto continuo basada únicamente en los datos
-      del archivo.
+      el sistema genera un resumen numérico y una explicación en texto continuo basada en los datos.
     </p>
 
-    <!-- Estado del motor (solo cálculo interno, sin LLM externo) -->
+    <!-- Estado del motor -->
     <div id="llmStatus" class="status small">
-      ℹ️ Este chatbot utiliza únicamente cálculos internos sobre tu CSV; no se conecta a ningún modelo externo.
+      ℹ️ El análisis numérico se hace en el navegador. Opcionalmente, el modo <strong>Pregunta Abierta</strong>
+      envía el resumen numérico y tu pregunta a un backend LLM en Hugging Face para generar la sección 6.
     </div>
 
-    <!-- Subir CSV (ahora SECCIÓN 1) -->
+    <!-- Subir CSV (SECCIÓN 1) -->
     <div>
       <div class="section-title">1. Subir archivo CSV</div>
       <label for="csvInput" id="csvLabel">
@@ -211,13 +211,13 @@
       <div id="fileStatus" class="status">⚠️ Ningún archivo seleccionado.</div>
     </div>
 
-    <!-- Elegir tipo de análisis + prompt interno (ahora SECCIÓN 2) -->
+    <!-- Elegir tipo de análisis + prompt interno (SECCIÓN 2) -->
     <div>
       <div class="section-title">2. Elegir tipo de análisis y prompt interno</div>
       <p class="small">
         Después de subir el CSV, se mostrarán aquí los tipos de análisis compatibles. Cada tipo activa sus
-        prompts internos. Al elegir uno, se cargará automáticamente un texto recomendado en la sección 3,
-        que puedes editar libremente.
+        prompts internos. Si prefieres <strong>Pregunta Abierta</strong>, se ignorarán esos prompts y se usará
+        únicamente tu texto + el resumen numérico para consultar el LLM conectado.
       </p>
 
       <div class="mode-options">
@@ -278,26 +278,34 @@
         </div>
       </div>
 
+      <!-- Botón Pregunta Abierta -->
+      <div class="row" style="margin-top:8px;">
+        <button class="btn secondary" type="button" onclick="activarPreguntaAbierta()">
+          Pregunta Abierta
+        </button>
+      </div>
+
       <div class="status small" id="modeStatus">
-        Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.
+        Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles
+        o podrás usar Pregunta Abierta con LLM.
       </div>
     </div>
 
-    <!-- Pregunta / Prompt -->
+    <!-- Pregunta / Prompt (SECCIÓN 3) -->
     <div>
       <div class="section-title">3. Prompt de análisis</div>
       <label for="question">
-        El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente
-        antes de ejecutar el cálculo.
+        El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente.
+        Si usas <strong>Pregunta Abierta</strong>, aquí escribes tu pregunta y no se carga ningún prompt interno.
       </label>
-      <textarea id="question" placeholder="Primero sube un CSV y luego elige un tipo de análisis para cargar aquí el texto recomendado…"></textarea>
+      <textarea id="question" placeholder="Sube un CSV y elige un tipo de análisis o pulsa Pregunta Abierta para escribir aquí tu propio texto…"></textarea>
       <div class="row">
         <button class="btn" type="button" onclick="analizarCSV()">
           4. Analizar CSV
         </button>
       </div>
       <div id="analysisStatus" class="status">
-        ⏳ Sube un CSV, elige un tipo de análisis en la sección 2 y luego usa el botón Analizar.
+        ⏳ Sube un CSV, elige un tipo de análisis en la sección 2 o activa Pregunta Abierta y luego usa el botón Analizar.
       </div>
     </div>
 
@@ -313,21 +321,27 @@
     <div>
       <div class="section-title">6. Explicación en texto continuo (respuesta extendida)</div>
       <div id="textOutput" class="output-box">
-        // Aquí se generará una explicación automática extensa basada en los resultados y en tu prompt.
+        // Aquí se generará una explicación automática extensa (interna o desde el LLM, según el modo).
       </div>
     </div>
   </div>
-  <!-- Lógica: CSV y análisis interno (sin LLM) -->
+  <!-- Lógica: CSV + análisis interno + LLM para Pregunta Abierta -->
   <script>
+    // ============================================================
+    //  Backend LLM (FastAPI en Hugging Face)
+    // ============================================================
+    const BACKEND_URL = "https://alexacido-consumertec-llm.hf.space/generate_answer";
+
     // -------------------------------------------------------------
     // Estado global
     // -------------------------------------------------------------
     let csvFile = null;
     let csvHeaders = null;
     let analysisMode = null;       // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
-    let currentPromptKey = null;   // identifica el prompt específico dentro de cada modo
+    let currentPromptKey = null;   // identifica el prompt específico
+    let openQuestionMode = false;  // Pregunta Abierta activa
 
-    // Tipos de análisis detectados como compatibles con el CSV subido
+    // Tipos de análisis detectados como compatibles
     const tiposDisponibles = {
       comparaciones: false,
       whiteness: false,
@@ -348,7 +362,7 @@
     const modeStatusEl = document.getElementById("modeStatus");
 
     // -------------------------------------------------------------
-    // Utilidad: actualizar visibilidad de grupos de prompts
+    // Actualizar visibilidad de grupos de prompts
     // -------------------------------------------------------------
     function actualizarDisponibilidadPrompts() {
       const groupCompar = document.getElementById("group_comparaciones");
@@ -356,35 +370,18 @@
       const groupRes    = document.getElementById("group_resumen");
       const groupResp   = document.getElementById("group_response_rel");
 
-      // Comparaciones
-      if (tiposDisponibles.comparaciones) {
-        groupCompar.classList.remove("hidden");
-      } else {
-        groupCompar.classList.add("hidden");
-      }
+      if (tiposDisponibles.comparaciones) groupCompar.classList.remove("hidden");
+      else groupCompar.classList.add("hidden");
 
-      // Blancura
-      if (tiposDisponibles.whiteness) {
-        groupWhite.classList.remove("hidden");
-      } else {
-        groupWhite.classList.add("hidden");
-      }
+      if (tiposDisponibles.whiteness) groupWhite.classList.remove("hidden");
+      else groupWhite.classList.add("hidden");
 
-      // Resumen (siempre que el CSV tenga al menos una columna)
-      if (tiposDisponibles.resumen) {
-        groupRes.classList.remove("hidden");
-      } else {
-        groupRes.classList.add("hidden");
-      }
+      if (tiposDisponibles.resumen) groupRes.classList.remove("hidden");
+      else groupRes.classList.add("hidden");
 
-      // RESPONSE vs otras columnas (solo si existe RESPONSE)
-      if (tiposDisponibles.response_rel) {
-        groupResp.classList.remove("hidden");
-      } else {
-        groupResp.classList.add("hidden");
-      }
+      if (tiposDisponibles.response_rel) groupResp.classList.remove("hidden");
+      else groupResp.classList.add("hidden");
 
-      // Mensaje de ayuda
       const activos = [];
       if (tiposDisponibles.comparaciones) activos.push("Comparaciones PRODUCT_TEST vs RESPONSE");
       if (tiposDisponibles.whiteness)     activos.push("Blancura por MONITOR (métricas WI)");
@@ -393,18 +390,18 @@
 
       if (!csvFile) {
         modeStatusEl.textContent =
-          "Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.";
+          "Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles o Pregunta Abierta.";
       } else if (!activos.length) {
         modeStatusEl.textContent =
-          "CSV cargado, pero no se detectó ninguna configuración estándar de análisis. Solo será posible un resumen básico.";
+          "CSV cargado, pero no se detectó ninguna configuración estándar. Puedes seguir usando Pregunta Abierta con resumen general.";
       } else {
         modeStatusEl.textContent =
-          "CSV cargado. Tipos de análisis disponibles: " + activos.join(" • ") +
-          ". Elige uno para que se cargue el prompt recomendado en la sección 3.";
+          "CSV cargado. Análisis disponibles: " + activos.join(" • ") +
+          ". O usa Pregunta Abierta para combinar tu texto con el resumen numérico.";
       }
     }
 
-    // Inicializar (sin CSV aún)
+    // Inicial
     actualizarDisponibilidadPrompts();
 
     // -------------------------------------------------------------
@@ -413,19 +410,20 @@
     csvInputEl.addEventListener("change", (ev) => {
       const file = ev.target.files && ev.target.files[0];
 
-      // Limpiar selección de modo al cambiar de CSV
+      // Reset al cambiar de CSV
+      csvFile = null;
+      csvHeaders = null;
       analysisMode = null;
       currentPromptKey = null;
+      openQuestionMode = false;
       document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
 
       const questionEl = document.getElementById("question");
       questionEl.value = "";
       questionEl.placeholder =
-        "Tras subir el CSV y elegir un tipo de análisis compatible, aquí se cargará el prompt recomendado…";
+        "Tras subir el CSV y elegir un tipo de análisis o Pregunta Abierta, aquí se cargará o escribirás el texto…";
 
       if (!file) {
-        csvFile = null;
-        csvHeaders = null;
         fileStatusEl.textContent = "⚠️ Ningún archivo seleccionado.";
         tiposDisponibles.comparaciones = false;
         tiposDisponibles.whiteness = false;
@@ -446,7 +444,6 @@
           const headers = results.meta && results.meta.fields ? results.meta.fields : [];
           csvHeaders = headers;
 
-          // Detectar compatibilidad para cada modo usando la misma lógica interna
           const validCompar   = validarHeadersPorModo("comparaciones", headers);
           const validWhite    = validarHeadersPorModo("whiteness", headers);
           const validResumen  = validarHeadersPorModo("resumen", headers);
@@ -469,10 +466,10 @@
             "✅ CSV cargado: " + file.name + " (" + formatBytes(file.size) + "). " +
             (disponibles.length
               ? "Análisis posibles: " + disponibles.join(" • ") + "."
-              : "Solo será posible un resumen básico de la tabla.");
+              : "Puedes usar un resumen general y Pregunta Abierta.");
 
           csvLabelEl.textContent =
-            "Archivo CSV cargado. Si lo deseas, puedes cambiarlo por otro. Ahora elige en la sección 2 el tipo de análisis.";
+            "Archivo CSV cargado. Si lo deseas, puedes cambiarlo por otro. Ahora elige en la sección 2 el tipo de análisis o Pregunta Abierta.";
 
           actualizarDisponibilidadPrompts();
         },
@@ -539,7 +536,6 @@
       }
 
       if (mode === "resumen") {
-        // Acepta cualquier CSV con al menos una columna
         if (!hdr.length) {
           return { ok: false, mensaje: "el CSV no tiene columnas detectables." };
         }
@@ -547,7 +543,6 @@
       }
 
       if (mode === "response_rel") {
-        // Necesita al menos la columna RESPONSE
         if (!set.has("RESPONSE")) {
           return {
             ok: false,
@@ -564,7 +559,12 @@
     // Selección de prompt interno (sección 2)
     // -------------------------------------------------------------
     function setModeInternal(mode, promptKey) {
-      // Debe existir un CSV primero
+      const llmStatusEl = document.getElementById("llmStatus");
+      const questionEl  = document.getElementById("question");
+
+      // Al elegir modo interno, desactivar Pregunta Abierta
+      openQuestionMode = false;
+
       if (!csvFile) {
         modeStatusEl.textContent =
           "⚠️ Primero sube un CSV en la sección 1. Después podrás elegir el tipo de análisis.";
@@ -572,10 +572,9 @@
         return;
       }
 
-      // Verificar que el modo es compatible con el CSV actual
       if (mode === "comparaciones" && !tiposDisponibles.comparaciones) {
         modeStatusEl.textContent =
-          "❌ El archivo cargado no tiene las columnas necesarias para análisis de Comparaciones (PRODUCT_TEST / RESPONSE).";
+          "❌ El archivo cargado no tiene las columnas necesarias para Comparaciones (PRODUCT_TEST / RESPONSE).";
         document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
         return;
       }
@@ -601,11 +600,10 @@
       analysisMode = mode;
       currentPromptKey = promptKey || mode;
 
-      const questionEl = document.getElementById("question");
       questionEl.placeholder =
         "Prompt oficial cargado para el análisis elegido. Puedes ajustarlo si lo deseas…";
 
-      // --- TEXTOS DE LOS PROMPTS SEGÚN MODO + VARIANTE ---
+      // === TEXTOS DE LOS PROMPTS INTERNOS (igual que tenías) ===
       if (mode === "comparaciones") {
         if (currentPromptKey === "comparaciones_basico") {
           questionEl.value =
@@ -641,16 +639,122 @@
       }
 
       let modoTexto = "";
-      if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE.";
-      else if (mode === "whiteness") modoTexto = "Blancura por MONITOR (métricas WI).";
-      else if (mode === "resumen") modoTexto = "Resumen general / avanzado de la tabla.";
-      else if (mode === "response_rel") modoTexto = "Comparar RESPONSE con las demás columnas.";
+      if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE (solo análisis interno).";
+      else if (mode === "whiteness") modoTexto = "Blancura por MONITOR (solo análisis interno).";
+      else if (mode === "resumen") modoTexto = "Resumen general / avanzado (análisis interno).";
+      else if (mode === "response_rel") modoTexto = "RESPONSE vs otras columnas (análisis interno).";
 
-      modeStatusEl.textContent =
-        "✅ Prompt interno seleccionado: " + modoTexto;
+      modeStatusEl.textContent = "✅ Prompt interno seleccionado: " + modoTexto;
+
+      if (llmStatusEl) {
+        llmStatusEl.textContent =
+          "ℹ️ Estás usando modo interno. El LLM sólo se usa cuando activas Pregunta Abierta.";
+      }
     }
 
     window.setMode = setModeInternal;
+
+    // -------------------------------------------------------------
+    // Pregunta Abierta: activa LLM con resumen numérico
+    // -------------------------------------------------------------
+    function activarPreguntaAbierta() {
+      const llmStatusEl = document.getElementById("llmStatus");
+      const questionEl  = document.getElementById("question");
+
+      if (!csvFile) {
+        modeStatusEl.textContent =
+          "⚠️ Para usar Pregunta Abierta primero debes subir un CSV en la sección 1.";
+        return;
+      }
+
+      // Marcar Pregunta Abierta y limpiar selección de radio buttons
+      openQuestionMode = true;
+      analysisMode = "resumen";        // usaremos el análisis de resumen para la sección 5
+      currentPromptKey = "resumen_abierto";
+
+      document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
+
+      questionEl.value = "";
+      questionEl.placeholder =
+        "Modo Pregunta Abierta: escribe aquí tu pregunta o enfoque. Se generará un resumen numérico en la sección 5 y la sección 6 vendrá del LLM externo.";
+
+      modeStatusEl.textContent =
+        "📝 Pregunta Abierta activada: se usará un resumen general del CSV (sección 5) y el LLM responderá en la sección 6.";
+
+      if (llmStatusEl) {
+        llmStatusEl.textContent =
+          "✅ Pregunta Abierta: el frontend calculará el resumen numérico y lo enviará junto con tu texto al backend /generate_answer.";
+      }
+    }
+
+    window.activarPreguntaAbierta = activarPreguntaAbierta;
+
+    // -------------------------------------------------------------
+    // Llamada al backend FastAPI /generate_answer
+    // -------------------------------------------------------------
+    async function pedirExplicacionDesdeBackend(userPrompt, numericSummary, mode) {
+      const textEl = document.getElementById("textOutput");
+      const llmStatusEl = document.getElementById("llmStatus");
+
+      if (!textEl) return;
+
+      const pregunta = (userPrompt || "").trim();
+      const resumen  = (numericSummary || "").trim();
+
+      textEl.textContent = "⏳ Llamando al backend /generate_answer…";
+
+      try {
+        const resp = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            mode: mode || "general",
+            question: pregunta,
+            numeric_summary: resumen
+          })
+        });
+
+        if (!resp.ok) {
+          const msg = "Respuesta HTTP no OK: " + resp.status;
+          console.error(msg);
+          textEl.textContent =
+            "❌ Error llamando al backend.\n" +
+            msg +
+            "\n\nPuedes revisar el resumen numérico en la sección 5 y, si lo deseas, copiarlo en tu propio análisis.";
+          if (llmStatusEl) {
+            llmStatusEl.textContent = "❌ Backend /generate_answer respondió con error " + resp.status + ".";
+          }
+          return;
+        }
+
+        const data = await resp.json();
+        const answer = (data && data.answer) ? String(data.answer).trim() : "";
+
+        if (!answer) {
+          textEl.textContent =
+            "⚠️ El backend no devolvió una respuesta de texto utilizable.\n" +
+            "Revisa el resumen numérico en la sección 5 para interpretar manualmente.";
+          if (llmStatusEl) {
+            llmStatusEl.textContent = "⚠️ Backend sin respuesta de texto.";
+          }
+        } else {
+          textEl.textContent = answer;
+          if (llmStatusEl) {
+            llmStatusEl.textContent = "✅ Respuesta generada por el backend /generate_answer (Pregunta Abierta).";
+          }
+        }
+      } catch (err) {
+        console.error("Error llamando al backend:", err);
+        textEl.textContent =
+          "❌ Error de red al llamar al backend /generate_answer.\n" +
+          "Revisa tu conexión o el estado del Space en Hugging Face.";
+        if (llmStatusEl) {
+          llmStatusEl.textContent = "❌ Error de red hacia el backend.";
+        }
+      }
+    }
 
     // -------------------------------------------------------------
     // Botón principal: analizar CSV
@@ -665,19 +769,27 @@
         statusEl.textContent = "⚠️ Sube primero el archivo CSV en la sección 1.";
         return;
       }
-      if (!analysisMode) {
-        statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2.";
+
+      // Si estamos en Pregunta Abierta forzamos modo resumen+LLM
+      if (openQuestionMode) {
+        analysisMode = "resumen";
+        if (!question) {
+          statusEl.textContent = "⚠️ En Pregunta Abierta debes escribir una pregunta o enfoque en la sección 3.";
+          return;
+        }
+      } else if (!analysisMode) {
+        statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2 o usa Pregunta Abierta.";
         return;
       }
 
-      statusEl.textContent = "⏳ Analizando CSV en modo: " +
-        (analysisMode === "whiteness"
-          ? "BLANCURA"
-          : analysisMode === "comparaciones"
-            ? "COMPARACIONES"
-            : analysisMode === "resumen"
-              ? "RESUMEN GENERAL / AVANZADO"
-              : "RESPONSE vs OTRAS COLUMNAS") + "…";
+      let modoTxt = "";
+      if (openQuestionMode) modoTxt = "RESUMEN + LLM (Pregunta Abierta)";
+      else if (analysisMode === "whiteness") modoTxt = "BLANCURA (interno)";
+      else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES (interno)";
+      else if (analysisMode === "resumen") modoTxt = "RESUMEN (interno, sin LLM)";
+      else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS (interno)";
+
+      statusEl.textContent = "⏳ Analizando CSV en modo: " + modoTxt + "…";
 
       numericEl.textContent = "// Procesando CSV, esto puede tardar para archivos grandes…";
       textEl.textContent = "// Preparando explicación…";
@@ -687,16 +799,17 @@
       } else if (analysisMode === "comparaciones") {
         analizarComparaciones(statusEl, numericEl, textEl, question);
       } else if (analysisMode === "resumen") {
-        analizarResumen(statusEl, numericEl, textEl, question);
+        // usarBackendLLM = true solo si Pregunta Abierta está activa
+        const usarBackendLLM = openQuestionMode;
+        analizarResumen(statusEl, numericEl, textEl, question, usarBackendLLM);
       } else if (analysisMode === "response_rel") {
         analizarResponseVsOtros(statusEl, numericEl, textEl, question);
       }
     }
 
     window.analizarCSV = analizarCSVInternal;
-
     // -------------------------------------------------------------
-    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE
+    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (interno)
     // -------------------------------------------------------------
     function analizarComparaciones(statusEl, numericEl, textEl, userPrompt) {
       const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
@@ -750,7 +863,7 @@
             totalFavorables
           );
 
-          statusEl.textContent = "✅ Análisis de comparaciones completado.";
+          statusEl.textContent = "✅ Análisis de comparaciones completado (interno).";
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -815,7 +928,7 @@
     }
 
     // -------------------------------------------------------------
-    // Modo 2: Blancura por MONITOR
+    // Modo 2: Blancura por MONITOR (interno)
     // -------------------------------------------------------------
     function analizarBlancura(statusEl, numericEl, textEl, userPrompt) {
       const data = {};
@@ -916,7 +1029,7 @@
 
           textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
 
-          statusEl.textContent = "✅ Análisis de blancura completado.";
+          statusEl.textContent = "✅ Análisis de blancura completado (interno).";
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -956,8 +1069,10 @@
 
     // -------------------------------------------------------------
     // Modo 3: Resumen general de la tabla
+    //   - Interno normal
+    //   - O con LLM cuando openQuestionMode = true (usarBackendLLM = true)
     // -------------------------------------------------------------
-    function analizarResumen(statusEl, numericEl, textEl, userPrompt) {
+    function analizarResumen(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const stats = {};
       let totalFilas = 0;
       let headersLocal = null;
@@ -992,7 +1107,6 @@
 
               const num = parseFloat(val.replace(",", "."));
               if (!Number.isNaN(num) && val.match(/^[+-]?(\d+(\.\d+)?|\.\d+)$/)) {
-                // Numérico "limpio"
                 stats[col].numericCount++;
                 stats[col].sum += num;
                 if (stats[col].min === null || num < stats[col].min) stats[col].min = num;
@@ -1053,14 +1167,20 @@
 
           numericEl.textContent = numTxt;
 
-          textEl.textContent = construirExplicacionLargaResumen(
-            userPrompt,
-            totalFilas,
-            headersLocal,
-            stats
-          );
-
-          statusEl.textContent = "✅ Resumen general / avanzado completado.";
+          if (usarBackendLLM) {
+            // Pregunta Abierta: usamos el backend LLM con el resumen numérico
+            pedirExplicacionDesdeBackend(userPrompt, numTxt, "resumen");
+            statusEl.textContent = "✅ Resumen numérico generado. Esperando respuesta del LLM en la sección 6…";
+          } else {
+            // Modo interno normal
+            textEl.textContent = construirExplicacionLargaResumen(
+              userPrompt,
+              totalFilas,
+              headersLocal,
+              stats
+            );
+            statusEl.textContent = "✅ Resumen general / avanzado completado (interno).";
+          }
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -1081,7 +1201,6 @@
       texto += "La tabla analizada contiene un total de " + totalFilas + " filas y " +
                headersLocal.length + " columnas, lo que ya sugiere un volumen de información suficiente como para identificar patrones y variaciones entre distintos campos.\n\n";
 
-      // Clasificar columnas numéricas vs categóricas/mixtas
       const colsNumericas = [];
       const colsCateg = [];
       headersLocal.forEach(col => {
@@ -1127,7 +1246,7 @@
     }
 
     // -------------------------------------------------------------
-    // Modo 4: Comparar RESPONSE con las demás columnas
+    // Modo 4: Comparar RESPONSE con las demás columnas (interno)
     // -------------------------------------------------------------
     function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt) {
       const responseCounts = {};
@@ -1217,7 +1336,7 @@
             resumenColumnas
           );
 
-          statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado.";
+          statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado (interno).";
         },
         error: function(err) {
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
@@ -1302,4 +1421,3 @@
   </script>
 </body>
 </html>
-
