@@ -808,6 +808,7 @@
     }
 
     window.analizarCSV = analizarCSVInternal;
+
     // -------------------------------------------------------------
     // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (interno)
     // -------------------------------------------------------------
@@ -873,6 +874,7 @@
       });
     }
 
+    // 👉 CAMBIO: ya NO se repite el prompt, intro genérica
     function construirExplicacionLargaComparaciones(
       userPrompt,
       ordenados,
@@ -882,13 +884,12 @@
     ) {
       const [prodGanador, cntGanador] = ordenados[0];
       const pctGanador = totalFavorables > 0 ? (cntGanador * 100 / totalFavorables).toFixed(1) : null;
-      const otros = ordenados.slice(1, Math.min(6, ordenados.length));
-      const promptIntro = userPrompt
-        ? "La pregunta planteada por el usuario fue la siguiente: «" +
-          userPrompt.replace(/\s+/g, " ").trim() +
-          "». A partir de esta petición, el análisis se centra en estudiar el comportamiento de PRODUCT_TEST frente a PRODUCT_BENCH utilizando únicamente las filas del CSV donde la respuesta indica una superioridad clara.\n\n"
-        : "En este análisis se ha considerado la información contenida en el archivo de comparaciones, enfocándose en las filas donde la respuesta indica un desempeño superior para PRODUCT_TEST frente a PRODUCT_BENCH.\n\n";
 
+      const promptIntro =
+        "En este análisis se ha considerado la información contenida en el archivo de comparaciones, " +
+        "enfocándose en las filas donde la respuesta indica un desempeño superior para PRODUCT_TEST frente a PRODUCT_BENCH.\n\n";
+
+      const otros = ordenados.slice(1, Math.min(6, ordenados.length));
       let texto = "";
 
       texto += promptIntro;
@@ -1039,16 +1040,15 @@
       });
     }
 
+    // 👉 CAMBIO: intro genérica, sin repetir prompt
     function construirExplicacionLargaBlancura(userPrompt, data, globalSorted) {
       if (!globalSorted.length) {
         return "// No se pudieron construir patrones globales de blancura.";
       }
       const [prodTop, cntTop] = globalSorted[0];
-      const promptIntro = userPrompt
-        ? "El análisis de blancura se ha guiado por la siguiente pregunta o enfoque: «" +
-          userPrompt.replace(/\s+/g, " ").trim() +
-          "».\n\n"
-        : "En este análisis se ha estudiado el comportamiento de la blancura a partir de los datos del CSV.\n\n";
+
+      const promptIntro =
+        "En este análisis se ha estudiado el comportamiento de la blancura a partir de los datos del CSV.\n\n";
 
       let texto = "";
       texto += promptIntro;
@@ -1190,11 +1190,10 @@
       });
     }
 
+    // 👉 CAMBIO: intro genérica, sin citar el prompt
     function construirExplicacionLargaResumen(userPrompt, totalFilas, headersLocal, stats) {
-      const promptIntro = userPrompt
-        ? "El resumen se ha elaborado tomando como referencia la siguiente instrucción: «" +
-          userPrompt.replace(/\s+/g," ").trim() + "».\n\n"
-        : "A continuación se presenta un resumen general de la estructura y el contenido del CSV analizado.\n\n";
+      const promptIntro =
+        "A continuación se presenta un resumen general de la estructura y el contenido del CSV analizado.\n\n";
 
       let texto = "";
       texto += promptIntro;
@@ -1346,16 +1345,15 @@
       });
     }
 
+    // 👉 CAMBIO: intro genérica, sin repetir el texto del prompt
     function construirExplicacionLargaResponseRel(
       userPrompt,
       totalFilas,
       sortedResponses,
       resumenColumnas
     ) {
-      const promptIntro = userPrompt
-        ? "El análisis de la relación entre RESPONSE y el resto de columnas se ha guiado por la instrucción: «" +
-          userPrompt.replace(/\s+/g," ").trim() + "».\n\n"
-        : "En este apartado se explora cómo se distribuye RESPONSE y qué asociaciones se observan con las demás columnas del CSV.\n\n";
+      const promptIntro =
+        "En este apartado se explora cómo se distribuye RESPONSE y qué asociaciones se observan con las demás columnas del CSV.\n\n";
 
       let texto = "";
       texto += promptIntro;
