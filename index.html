@@ -12,7 +12,7 @@
     :root{
       --bg:#020617;
       --card:#020617;
-      --border:#1f2937;
+      --border:1f2937;
       --accent:#22d3ee;
       --accent2:#4ade80;
       --text:#e5e7eb;
@@ -192,13 +192,15 @@
       el archivo CSV que se desea analizar. A partir de su estructura, en la <strong>sección 2</strong> se
       activan los <strong>prompts internos</strong> compatibles (comparaciones, blancura, resumen general,
       relación de RESPONSE con las demás columnas o sus variantes avanzadas). Después se ejecuta el análisis:
-      el sistema genera un resumen numérico y una explicación en texto continuo basada en los datos.
+      el sistema genera un <strong>resumen numérico en el navegador (sección 5)</strong> y, con ese resumen
+      más tu prompt de análisis, se llama a un <strong>LLM en Hugging Face</strong> para construir la
+      explicación extensa en la <strong>sección 6</strong>.
     </p>
 
     <!-- Estado del motor -->
     <div id="llmStatus" class="status small">
-      ℹ️ El análisis numérico se hace en el navegador. Opcionalmente, el modo <strong>Pregunta Abierta</strong>
-      envía el resumen numérico y tu pregunta a un backend LLM en Hugging Face para generar la sección 6.
+      ℹ️ El análisis numérico se hace en el navegador (sección 5) y siempre se envía el resumen numérico
+      junto con tu prompt de análisis a un backend LLM en Hugging Face para generar la sección 6.
     </div>
 
     <!-- Subir CSV (SECCIÓN 1) -->
@@ -216,8 +218,9 @@
       <div class="section-title">2. Elegir tipo de análisis y prompt interno</div>
       <p class="small">
         Después de subir el CSV, se mostrarán aquí los tipos de análisis compatibles. Cada tipo activa sus
-        prompts internos. Si prefieres <strong>Pregunta Abierta</strong>, se ignorarán esos prompts y se usará
-        únicamente tu texto + el resumen numérico para consultar el LLM conectado.
+        prompts internos. El prompt seleccionado se mostrará en la <strong>sección 3</strong> (puedes editarlo)
+        y se usará junto con el resumen numérico como entrada para el LLM que genera la explicación de la
+        <strong>sección 6</strong>.
       </p>
 
       <div class="mode-options">
@@ -278,16 +281,8 @@
         </div>
       </div>
 
-      <!-- Botón Pregunta Abierta -->
-      <div class="row" style="margin-top:8px;">
-        <button class="btn secondary" type="button" onclick="activarPreguntaAbierta()">
-          Pregunta Abierta
-        </button>
-      </div>
-
       <div class="status small" id="modeStatus">
-        Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles
-        o podrás usar Pregunta Abierta con LLM.
+        Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.
       </div>
     </div>
 
@@ -296,16 +291,17 @@
       <div class="section-title">3. Prompt de análisis</div>
       <label for="question">
         El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente.
-        Si usas <strong>Pregunta Abierta</strong>, aquí escribes tu pregunta y no se carga ningún prompt interno.
+        Este texto se enviará junto con el <strong>resumen numérico</strong> al backend LLM para generar
+        la explicación de la sección 6.
       </label>
-      <textarea id="question" placeholder="Sube un CSV y elige un tipo de análisis o pulsa Pregunta Abierta para escribir aquí tu propio texto…"></textarea>
+      <textarea id="question" placeholder="Sube un CSV y elige un tipo de análisis; aquí aparecerá el prompt asociado, que podrás ajustar…"></textarea>
       <div class="row">
         <button class="btn" type="button" onclick="analizarCSV()">
           4. Analizar CSV
         </button>
       </div>
       <div id="analysisStatus" class="status">
-        ⏳ Sube un CSV, elige un tipo de análisis en la sección 2 o activa Pregunta Abierta y luego usa el botón Analizar.
+        ⏳ Sube un CSV, elige un tipo de análisis en la sección 2 y luego usa el botón Analizar.
       </div>
     </div>
 
@@ -313,7 +309,7 @@
     <div>
       <div class="section-title">5. Resultados numéricos (resumen técnico)</div>
       <div id="numericOutput" class="output-box small">
-        // Aquí aparecerán tablas de conteos, máximos por producto, etc.
+        // Aquí aparecerán tablas de conteos, máximos por producto, etc. (cálculo interno en el navegador).
       </div>
     </div>
 
@@ -321,14 +317,14 @@
     <div>
       <div class="section-title">6. Explicación en texto continuo (respuesta extendida)</div>
       <div id="textOutput" class="output-box">
-        // Aquí se generará una explicación automática extensa (interna o desde el LLM, según el modo).
+        // Aquí se generará una explicación automática extensa producida por el LLM, usando el resumen numérico y tu prompt de análisis.
       </div>
     </div>
   </div>
-   <!-- Lógica: CSV + análisis interno + LLM para Pregunta Abierta -->
+  <!-- Lógica: CSV + análisis interno + LLM -->
   <script>
     // ============================================================
-    //  Backend LLM (FastAPI en Hugging Face)
+    //  Backend LLM (FastAPI en Hugging Face) para sección 6
     // ============================================================
     const BACKEND_URL = "https://alexacido-consumertec-llm.hf.space/generate_answer";
 
@@ -339,7 +335,6 @@
     let csvHeaders = null;
     let analysisMode = null;       // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
     let currentPromptKey = null;   // identifica el prompt específico
-    let openQuestionMode = false;  // Pregunta Abierta activa
 
     // Tipos de análisis detectados como compatibles
     const tiposDisponibles = {
@@ -390,14 +385,14 @@
 
       if (!csvFile) {
         modeStatusEl.textContent =
-          "Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles o Pregunta Abierta.";
+          "Primero sube un CSV en la sección 1. Luego se activarán aquí los tipos de análisis compatibles.";
       } else if (!activos.length) {
         modeStatusEl.textContent =
-          "CSV cargado, pero no se detectó ninguna configuración estándar. Puedes seguir usando Pregunta Abierta con resumen general.";
+          "CSV cargado, pero no se detectó ninguna configuración estándar. Puedes seguir usando un resumen general con el modo Resumen.";
       } else {
         modeStatusEl.textContent =
           "CSV cargado. Análisis disponibles: " + activos.join(" • ") +
-          ". O usa Pregunta Abierta para combinar tu texto con el resumen numérico.";
+          ". El análisis numérico se hará en la sección 5 y el LLM generará la explicación en la 6.";
       }
     }
 
@@ -415,13 +410,12 @@
       csvHeaders = null;
       analysisMode = null;
       currentPromptKey = null;
-      openQuestionMode = false;
       document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
 
       const questionEl = document.getElementById("question");
       questionEl.value = "";
       questionEl.placeholder =
-        "Tras subir el CSV y elegir un tipo de análisis o Pregunta Abierta, aquí se cargará o escribirás el texto…";
+        "Tras subir el CSV y elegir un tipo de análisis en la sección 2, aquí se cargará el prompt correspondiente…";
 
       if (!file) {
         fileStatusEl.textContent = "⚠️ Ningún archivo seleccionado.";
@@ -466,10 +460,10 @@
             "✅ CSV cargado: " + file.name + " (" + formatBytes(file.size) + "). " +
             (disponibles.length
               ? "Análisis posibles: " + disponibles.join(" • ") + "."
-              : "Puedes usar un resumen general y Pregunta Abierta.");
+              : "Puedes usar un resumen general con el modo Resumen.");
 
           csvLabelEl.textContent =
-            "Archivo CSV cargado. Si lo deseas, puedes cambiarlo por otro. Ahora elige en la sección 2 el tipo de análisis o Pregunta Abierta.";
+            "Archivo CSV cargado. Si lo deseas, puedes cambiarlo por otro. Ahora elige en la sección 2 el tipo de análisis.";
 
           actualizarDisponibilidadPrompts();
         },
@@ -562,9 +556,6 @@
       const llmStatusEl = document.getElementById("llmStatus");
       const questionEl  = document.getElementById("question");
 
-      // Al elegir modo interno, desactivar Pregunta Abierta
-      openQuestionMode = false;
-
       if (!csvFile) {
         modeStatusEl.textContent =
           "⚠️ Primero sube un CSV en la sección 1. Después podrás elegir el tipo de análisis.";
@@ -639,63 +630,20 @@
       }
 
       let modoTexto = "";
-      if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE (solo análisis interno).";
-      else if (mode === "whiteness") modoTexto = "Blancura por MONITOR (solo análisis interno).";
-      else if (mode === "resumen") modoTexto = "Resumen general / avanzado (análisis interno).";
-      else if (mode === "response_rel") modoTexto = "RESPONSE vs otras columnas (análisis interno).";
+      if (mode === "comparaciones") modoTexto = "Comparación PRODUCT_TEST vs RESPONSE.";
+      else if (mode === "whiteness") modoTexto = "Blancura por MONITOR.";
+      else if (mode === "resumen") modoTexto = "Resumen general / avanzado.";
+      else if (mode === "response_rel") modoTexto = "RESPONSE vs otras columnas.";
 
       modeStatusEl.textContent = "✅ Prompt interno seleccionado: " + modoTexto;
 
       if (llmStatusEl) {
         llmStatusEl.textContent =
-          "ℹ️ Estás usando modo interno. El LLM sólo se usa cuando activas Pregunta Abierta.";
+          "✅ El resumen numérico se calcula en el navegador (sección 5) y siempre se envía al backend /generate_answer junto con tu prompt para generar la sección 6.";
       }
     }
 
     window.setMode = setModeInternal;
-
-    // -------------------------------------------------------------
-    // Pregunta Abierta: activa LLM manteniendo el modo numérico
-    // -------------------------------------------------------------
-    function activarPreguntaAbierta() {
-      const llmStatusEl = document.getElementById("llmStatus");
-      const questionEl  = document.getElementById("question");
-
-      if (!csvFile) {
-        modeStatusEl.textContent =
-          "⚠️ Para usar Pregunta Abierta primero debes subir un CSV en la sección 1.";
-        return;
-      }
-
-      openQuestionMode = true;
-
-      // Si NO hay modo elegido todavía, usamos RESUMEN como fallback.
-      const teniaModoPrevio = !!analysisMode;
-      if (!teniaModoPrevio) {
-        analysisMode = "resumen";
-        currentPromptKey = "resumen_abierto";
-        document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = false; });
-      }
-
-      questionEl.value = "";
-      questionEl.placeholder =
-        "Modo Pregunta Abierta: escribe aquí tu pregunta o enfoque. Se generará el resumen numérico interno en la sección 5 y la sección 6 vendrá del LLM externo.";
-
-      if (teniaModoPrevio) {
-        modeStatusEl.textContent =
-          "📝 Pregunta Abierta activada sobre el modo actual: la sección 5 usará el mismo cálculo interno y la sección 6 será generada por el LLM.";
-      } else {
-        modeStatusEl.textContent =
-          "📝 Pregunta Abierta activada (modo resumen): se usará un resumen general del CSV (sección 5) y el LLM responderá en la sección 6.";
-      }
-
-      if (llmStatusEl) {
-        llmStatusEl.textContent =
-          "✅ Pregunta Abierta: se mantiene el cálculo numérico interno de la sección 5 y ese resumen se envía al backend /generate_answer para construir la sección 6.";
-      }
-    }
-
-    window.activarPreguntaAbierta = activarPreguntaAbierta;
 
     // -------------------------------------------------------------
     // Llamada al backend FastAPI /generate_answer
@@ -750,7 +698,7 @@
         } else {
           textEl.textContent = answer;
           if (llmStatusEl) {
-            llmStatusEl.textContent = "✅ Respuesta generada por el backend /generate_answer (Pregunta Abierta).";
+            llmStatusEl.textContent = "✅ Respuesta generada por el backend /generate_answer (sección 6).";
           }
         }
       } catch (err) {
@@ -766,53 +714,39 @@
 
     // -------------------------------------------------------------
     // Botón principal: analizar CSV
+    //   - SIEMPRE: sección 5 numérico en navegador
+    //   - SIEMPRE: sección 6 LLM
     // -------------------------------------------------------------
     function analizarCSVInternal() {
-      const statusEl = document.getElementById("analysisStatus");
+      const statusEl  = document.getElementById("analysisStatus");
       const numericEl = document.getElementById("numericOutput");
-      const textEl = document.getElementById("textOutput");
-      const question = document.getElementById("question").value.trim();
+      const textEl    = document.getElementById("textOutput");
+      const question  = document.getElementById("question").value.trim();
 
       if (!csvFile) {
         statusEl.textContent = "⚠️ Sube primero el archivo CSV en la sección 1.";
         return;
       }
 
-      if (openQuestionMode) {
-        // En Pregunta Abierta siempre necesitamos una pregunta
-        if (!question) {
-          statusEl.textContent = "⚠️ En Pregunta Abierta debes escribir una pregunta o enfoque en la sección 3.";
-          return;
-        }
-        // Si aún no había modo (caso: solo Pregunta Abierta), ya se fijó a 'resumen' en activarPreguntaAbierta().
-        if (!analysisMode) {
-          analysisMode = "resumen";
-          currentPromptKey = "resumen_abierto";
-        }
-      } else if (!analysisMode) {
-        statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2 o usa Pregunta Abierta.";
+      if (!analysisMode) {
+        statusEl.textContent = "⚠️ Elige un tipo de análisis en la sección 2.";
         return;
       }
 
-      const usarBackendLLM = openQuestionMode;
-
-      let modoTxt = "";
-      if (usarBackendLLM) {
-        if (analysisMode === "whiteness") modoTxt = "BLANCURA + LLM (Pregunta Abierta)";
-        else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES + LLM (Pregunta Abierta)";
-        else if (analysisMode === "resumen") modoTxt = "RESUMEN + LLM (Pregunta Abierta)";
-        else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS + LLM (Pregunta Abierta)";
-      } else {
-        if (analysisMode === "whiteness") modoTxt = "BLANCURA (interno)";
-        else if (analysisMode === "comparaciones") modoTxt = "COMPARACIONES (interno)";
-        else if (analysisMode === "resumen") modoTxt = "RESUMEN (interno, sin LLM)";
-        else if (analysisMode === "response_rel") modoTxt = "RESPONSE vs OTRAS COLUMNAS (interno)";
+      if (!question) {
+        statusEl.textContent = "⚠️ El prompt de análisis (sección 3) no puede estar vacío.";
+        return;
       }
 
-      statusEl.textContent = "⏳ Analizando CSV en modo: " + modoTxt + "…";
+      statusEl.textContent =
+        "⏳ Analizando CSV en el navegador y preparando envío al LLM…";
 
-      numericEl.textContent = "// Procesando CSV, esto puede tardar para archivos grandes…";
-      textEl.textContent = "// Preparando explicación…";
+      numericEl.textContent =
+        "// Procesando CSV para generar el resumen técnico…";
+      textEl.textContent =
+        "// Esperando respuesta del LLM (sección 6)…";
+
+      const usarBackendLLM = true;  // SIEMPRE LLM para la explicación
 
       if (analysisMode === "whiteness") {
         analizarBlancura(statusEl, numericEl, textEl, question, usarBackendLLM);
@@ -829,8 +763,6 @@
 
     // -------------------------------------------------------------
     // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE
-    //   - Interno normal
-    //   - O con LLM si usarBackendLLM = true (sección 5 igual, sección 6 = LLM)
     // -------------------------------------------------------------
     function analizarComparaciones(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
@@ -859,7 +791,7 @@
           if (Object.keys(conteos).length === 0) {
             statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
             numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
-            textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión.";
+            textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión con el LLM.";
             return;
           }
 
@@ -875,23 +807,12 @@
             numTxt += "  - " + prod + ": " + cnt + " (" + pct + " de los favorables)\n";
           }
 
-          // 👉 Sección 5 SIEMPRE usa este cálculo interno, con o sin Pregunta Abierta
+          // 👉 Sección 5 SIEMPRE usa este cálculo interno
           numericEl.textContent = numTxt;
 
           if (usarBackendLLM) {
-            // Sección 6 desde el LLM, usando el mismo resumen numérico de comparaciones
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
             statusEl.textContent = "✅ Análisis de comparaciones numérico generado. Esperando respuesta del LLM en la sección 6…";
-          } else {
-            // Explicación interna
-            textEl.textContent = construirExplicacionLargaComparaciones(
-              userPrompt,
-              ordenados,
-              totalFilas,
-              totalFiltradas,
-              totalFavorables
-            );
-            statusEl.textContent = "✅ Análisis de comparaciones completado (interno).";
           }
         },
         error: function(err) {
@@ -902,63 +823,8 @@
       });
     }
 
-    function construirExplicacionLargaComparaciones(
-      userPrompt,
-      ordenados,
-      totalFilas,
-      totalFiltradas,
-      totalFavorables
-    ) {
-      const [prodGanador, cntGanador] = ordenados[0];
-      const pctGanador = totalFavorables > 0 ? (cntGanador * 100 / totalFavorables).toFixed(1) : null;
-
-      const promptIntro =
-        "En este análisis se ha considerado la información contenida en el archivo de comparaciones, " +
-        "enfocándose en las filas donde la respuesta indica un desempeño superior para PRODUCT_TEST frente a PRODUCT_BENCH.\n\n";
-
-      const otros = ordenados.slice(1, Math.min(6, ordenados.length));
-      let texto = "";
-
-      texto += promptIntro;
-      texto += "El archivo incluye un total de " + totalFilas + " filas, pero para evaluar el desempeño real de los productos se filtraron únicamente aquellos casos en los que la columna RESPONSE toma los valores 01.SUPERIOR o 02.SUPERIOR_TREND. ";
-      texto += "Tras este filtrado, quedaron " + totalFiltradas + " observaciones que pueden considerarse evidencias de superioridad o tendencia a la superioridad. ";
-      texto += "A partir de este conjunto depurado se contabilizó cuántas veces cada valor de PRODUCT_TEST aparece asociado a un resultado favorable, agrupando todos los escenarios de MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD para tener una visión global.\n\n";
-
-      texto += "Los resultados muestran que el producto que más veces alcanza un resultado favorable es «" + prodGanador + "», con " + cntGanador + " ocurrencias. ";
-      if (pctGanador !== null) {
-        texto += "Si se compara este número con el total de casos favorables, «" + prodGanador + "» concentra aproximadamente el " + pctGanador + "% de todas las situaciones en las que algún producto gana frente al benchmark. ";
-      }
-      texto += "Este nivel de presencia indica que «" + prodGanador + "» tiende a repetir este comportamiento a lo largo de diversas combinaciones de condiciones de lavado, tipo de tejido, escenario de suciedad, monitor de evaluación y umbral de decisión.\n\n";
-
-      if (otros.length > 0) {
-        texto += "Cuando se observa el resto de productos, aparecen otras formulaciones que logran también un número significativo de victorias, aunque siempre por debajo de «" + prodGanador + "». ";
-        texto += "Entre los principales competidores se encuentran:\n\n";
-
-        otros.forEach(([prod, cnt]) => {
-          const pct = totalFavorables > 0 ? (cnt * 100 / totalFavorables).toFixed(1) : null;
-          texto += "• «" + prod + "» con " + cnt + " resultados favorables";
-          if (pct !== null) {
-            texto += ", lo que representa aproximadamente el " + pct + "% del total de casos favorables";
-          }
-          texto += ".\n";
-        });
-        texto += "\n";
-      }
-
-      texto += "Más allá del simple conteo de victorias, es importante considerar la diversidad de contextos en los que se produce la superioridad. ";
-      texto += "Cada fila corresponde a una combinación específica de MODALITY, SCENARIOS, WASH, PROCESS, MONITOR, INDEX y THRESHOLD. ";
-      texto += "Que un producto aparezca repetidamente como superior sugiere que su formulación es robusta frente a cambios en estas variables.\n\n";
-
-      texto += "En resumen, considerando exclusivamente las filas en las que PRODUCT_TEST demuestra superioridad frente a PRODUCT_BENCH, ";
-      texto += "el análisis pone de manifiesto que «" + prodGanador + "» es el producto con mejor desempeño global en términos de frecuencia de victorias y potencial robustez a través de distintos escenarios.\n";
-
-      return texto;
-    }
-
     // -------------------------------------------------------------
     // Modo 2: Blancura por MONITOR
-    //   - Interno normal
-    //   - O con LLM si usarBackendLLM = true
     // -------------------------------------------------------------
     function analizarBlancura(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const data = {};
@@ -1013,7 +879,7 @@
           if (!Object.keys(data).length) {
             statusEl.textContent = "❌ No se encontraron datos válidos de blancura por MONITOR.";
             numericEl.textContent = "// Sin resultados de métricas de blancura.";
-            textEl.textContent = "// No hay suficientes datos de blancura para generar una conclusión.";
+            textEl.textContent = "// No hay suficientes datos de blancura para generar una conclusión con el LLM.";
             return;
           }
 
@@ -1061,9 +927,6 @@
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "whiteness");
             statusEl.textContent = "✅ Análisis de blancura numérico generado. Esperando respuesta del LLM en la sección 6…";
-          } else {
-            textEl.textContent = construirExplicacionLargaBlancura(userPrompt, data, globalSorted);
-            statusEl.textContent = "✅ Análisis de blancura completado (interno).";
           }
         },
         error: function(err) {
@@ -1074,36 +937,8 @@
       });
     }
 
-    function construirExplicacionLargaBlancura(userPrompt, data, globalSorted) {
-      if (!globalSorted.length) {
-        return "// No se pudieron construir patrones globales de blancura.";
-      }
-      const [prodTop, cntTop] = globalSorted[0];
-
-      const promptIntro =
-        "En este análisis se ha estudiado el comportamiento de la blancura a partir de los datos del CSV.\n\n";
-
-      let texto = "";
-      texto += promptIntro;
-      texto += "A partir de las métricas de blancura asociadas a cada MONITOR, se identificaron los valores máximos de las distintas métricas WI en función de las combinaciones de producto, modalidad de lavado, escenario de suciedad y proceso. ";
-      texto += "El recuento global de apariciones como máximo de blancura muestra que el producto que más veces lidera es «" + prodTop + "», con " + cntTop + " apariciones entre todas las combinaciones de MONITOR y métricas de blancura consideradas.\n\n";
-
-      texto += "Este patrón sugiere que la formulación asociada a «" + prodTop + "» tiene una capacidad notable para generar niveles elevados de blancura en condiciones variadas. ";
-      texto += "Aunque otros productos también alcanzan en ocasiones los valores máximos en determinados monitores o métricas, la frecuencia con la que «" + prodTop + "» aparece como referencia indica una ventaja global en términos de consistencia.\n\n";
-
-      texto += "Al desglosar los resultados por monitor, se observa que cada sistema de evaluación aporta matices distintos: algunos monitores pueden ser más sensibles a diferencias de matiz verdoso o violáceo, mientras que otros ponen más énfasis en la blancura luminosa o estándar. ";
-      texto += "El hecho de que un mismo producto destaque repetidamente en diferentes monitores y métricas refuerza la idea de una blancura percibida más sólida en un rango amplio de condiciones.\n\n";
-
-      texto += "En conjunto, y siempre dentro de los límites del CSV analizado, los datos apuntan a que «" + prodTop + "» ofrece un mejor desempeño global cuando se consideran simultáneamente los distintos monitores y las métricas de blancura estudiadas. ";
-      texto += "Otros productos pueden mostrar picos de rendimiento en contextos concretos, pero ninguno parece igualar la combinación de frecuencia y diversidad de situaciones en las que «" + prodTop + "» se sitúa en la parte alta del ranking de blancura.\n";
-
-      return texto;
-    }
-
     // -------------------------------------------------------------
     // Modo 3: Resumen general de la tabla
-    //   - Interno normal
-    //   - O con LLM cuando usarBackendLLM = true
     // -------------------------------------------------------------
     function analizarResumen(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const stats = {};
@@ -1155,7 +990,7 @@
           if (!headersLocal || !headersLocal.length) {
             statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
             numericEl.textContent = "// Sin información estructural disponible.";
-            textEl.textContent = "// No hay suficiente información para generar un resumen.";
+            textEl.textContent = "// No hay suficiente información para generar un resumen con el LLM.";
             return;
           }
 
@@ -1204,14 +1039,6 @@
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "resumen");
             statusEl.textContent = "✅ Resumen numérico generado. Esperando respuesta del LLM en la sección 6…";
-          } else {
-            textEl.textContent = construirExplicacionLargaResumen(
-              userPrompt,
-              totalFilas,
-              headersLocal,
-              stats
-            );
-            statusEl.textContent = "✅ Resumen general / avanzado completado (interno).";
           }
         },
         error: function(err) {
@@ -1222,63 +1049,8 @@
       });
     }
 
-    function construirExplicacionLargaResumen(userPrompt, totalFilas, headersLocal, stats) {
-      const promptIntro =
-        "A continuación se presenta un resumen general de la estructura y el contenido del CSV analizado.\n\n";
-
-      let texto = "";
-      texto += promptIntro;
-      texto += "La tabla analizada contiene un total de " + totalFilas + " filas y " +
-               headersLocal.length + " columnas, lo que ya sugiere un volumen de información suficiente como para identificar patrones y variaciones entre distintos campos.\n\n";
-
-      const colsNumericas = [];
-      const colsCateg = [];
-      headersLocal.forEach(col => {
-        const s = stats[col];
-        if (!s) return;
-        const esNumerica = s.numericCount > 0 && s.nonNumericCount === 0;
-        if (esNumerica) colsNumericas.push(col);
-        else colsCateg.push(col);
-      });
-
-      if (colsNumericas.length > 0) {
-        texto += "En cuanto a variables numéricas, se identifican columnas como ";
-        texto += "«" + colsNumericas.slice(0,4).join("», «") + "»";
-        if (colsNumericas.length > 4) {
-          texto += " y otras más, que completan un conjunto de " + colsNumericas.length + " columnas de carácter cuantitativo. ";
-        } else {
-          texto += ", que en conjunto conforman el núcleo de información numérica de la tabla. ";
-        }
-        texto += "Estas columnas permiten estimar rangos, promedios y posibles diferencias entre productos, escenarios o procesos, según la naturaleza específica de cada campo.\n\n";
-      }
-
-      if (colsCateg.length > 0) {
-        texto += "Por el lado de las variables categóricas o mixtas, aparecen columnas como ";
-        texto += "«" + colsCateg.slice(0,4).join("», «") + "»";
-        if (colsCateg.length > 4) {
-          texto += " y varias más, que aportan etiquetas y clasificaciones clave para interpretar los resultados numéricos. ";
-        } else {
-          texto += ", que sirven como ejes de segmentación para organizar la información de la tabla. ";
-        }
-        texto += "En estas columnas suelen concentrarse códigos de producto, tipos de monitor, modalidades de lavado, escenarios de suciedad o procesos, lo que permite dividir la información en grupos comparables.\n\n";
-      }
-
-      texto += "Si se observa el comportamiento interno de cada columna, se aprecia que algunas presentan una gran diversidad de categorías, mientras que otras se concentran en unos pocos valores recurrentes. ";
-      texto += "Las columnas con muchas categorías distintas pueden estar capturando una variedad amplia de situaciones o combinaciones experimentales, mientras que aquellas con pocos valores dominantes indican focos claros de interés o configuraciones repetidas a lo largo del experimento.\n\n";
-
-      texto += "En términos generales, la estructura de la tabla ofrece un equilibrio entre campos numéricos y categóricos, lo que facilita la construcción de indicadores agregados (promedios, máximos, rangos) y, al mismo tiempo, la segmentación por tipo de producto, monitor o escenario. ";
-      texto += "Este equilibrio es especialmente útil en contextos de evaluación comparativa, donde no solo importa el valor numérico aislado, sino también el contexto experimental en el que se obtiene.\n\n";
-
-      texto += "De este modo, el CSV no solo actúa como un contenedor de resultados, sino como un mapa donde cada columna añade una capa distinta de significado: unas cuantifican el desempeño, otras describen las condiciones de prueba y otras organizan las observaciones en familias coherentes. ";
-      texto += "La combinación de todas ellas permite construir lecturas más ricas sobre el comportamiento de los productos y sobre cómo cambian los resultados al modificar los distintos factores del experimento.\n";
-
-      return texto;
-    }
-
     // -------------------------------------------------------------
     // Modo 4: Comparar RESPONSE con las demás columnas
-    //   - Interno normal
-    //   - O con LLM cuando usarBackendLLM = true
     // -------------------------------------------------------------
     function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const responseCounts = {};
@@ -1320,7 +1092,7 @@
           if (!headersLocal || !headersLocal.length) {
             statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
             numericEl.textContent = "// Sin información estructural disponible.";
-            textEl.textContent = "// No hay suficiente información para analizar RESPONSE.";
+            textEl.textContent = "// No hay suficiente información para analizar RESPONSE con el LLM.";
             return;
           }
 
@@ -1365,14 +1137,6 @@
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "response_rel");
             statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas (numérico) generado. Esperando respuesta del LLM en la sección 6…";
-          } else {
-            textEl.textContent = construirExplicacionLargaResponseRel(
-              userPrompt,
-              totalFilas,
-              sortedResponses,
-              resumenColumnas
-            );
-            statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas completado (interno).";
           }
         },
         error: function(err) {
@@ -1382,77 +1146,6 @@
         }
       });
     }
-
-    function construirExplicacionLargaResponseRel(
-      userPrompt,
-      totalFilas,
-      sortedResponses,
-      resumenColumnas
-    ) {
-      const promptIntro =
-        "En este apartado se explora cómo se distribuye RESPONSE y qué asociaciones se observan con las demás columnas del CSV.\n\n";
-
-      let texto = "";
-      texto += promptIntro;
-
-      if (!sortedResponses.length) {
-        texto += "En la práctica, no se han encontrado valores informativos en la columna RESPONSE, por lo que no es posible establecer patrones claros frente al resto de columnas.\n";
-        return texto;
-      }
-
-      const [respTop, cntTop] = sortedResponses[0];
-      const pctTop = totalFilas > 0 ? (cntTop*100/totalFilas).toFixed(1) : null;
-
-      texto += "Al observar la distribución general, la columna RESPONSE se reparte en varios valores posibles, pero el que domina con mayor peso es «" + respTop + "», que reúne " + cntTop + " filas";
-      if (pctTop !== null) {
-        texto += ", lo que equivale aproximadamente al " + pctTop + "% del total de registros";
-      }
-      texto += ". El resto de valores de RESPONSE aparece con menor frecuencia, conformando una cola de resultados menos habituales que también contribuyen a matizar la lectura global.\n\n";
-
-      if (sortedResponses.length > 1) {
-        const segundas = sortedResponses.slice(1,3);
-        if (segundas.length) {
-          texto += "Además de este valor dominante, se identifican otros resultados de RESPONSE que, aunque menos frecuentes, reúnen un número apreciable de casos. ";
-          texto += "Entre ellos destacan ";
-          texto += segundas.map(([r,c]) => "«" + r + "» (" + c + " filas)").join(" y ");
-          texto += ", que completan el mapa de respuestas posibles en el experimento.\n\n";
-        }
-      }
-
-      if (!resumenColumnas.length) {
-        texto += "Al relacionar RESPONSE con el resto de columnas, no se han encontrado patrones suficientemente claros como para destacar asociaciones específicas, posiblemente debido a la dispersión de los datos o a la diversidad de valores. ";
-        texto += "Aun así, la distribución global de RESPONSE ya permite intuir qué resultados se repiten con mayor insistencia en el conjunto de ensayos.\n";
-        return texto;
-      }
-
-      texto += "Cuando se cruza RESPONSE con otras columnas clave de la tabla, comienzan a aparecer patrones más concretos. ";
-      texto += "Cada columna actúa como un eje de segmentación que permite ver qué combinaciones de valores se repiten con mayor frecuencia para cada tipo de respuesta.\n\n";
-
-      const columnasComentadas = resumenColumnas.slice(0,3);
-      columnasComentadas.forEach(colInfo => {
-        const colName = colInfo.columna;
-        const perResponseTop = colInfo.perResponseTop || {};
-        texto += "En la columna «" + colName + "», las distribuciones por RESPONSE muestran que:\n";
-
-        const respuestasComentadas = Object.entries(perResponseTop).slice(0,2);
-        if (!respuestasComentadas.length) {
-          texto += "  No se observan concentraciones claras asociadas a valores específicos de RESPONSE en esta columna.\n\n";
-          return;
-        }
-
-        respuestasComentadas.forEach(([respVal, topVals]) => {
-          if (!topVals || !topVals.length) return;
-          const lista = topVals.map(([v,c]) => "«" + v + "» (" + c + " filas)").join(", ");
-          texto += "  Para RESPONSE = «" + respVal + "» predominan valores como " + lista + ".\n";
-        });
-        texto += "\n";
-      });
-
-      texto += "En conjunto, estas asociaciones no deben interpretarse como relaciones causales directas, pero sí como indicios de que ciertos contextos (definidos por productos, monitores, modalidades o escenarios) tienden a coincidir con determinados resultados de RESPONSE con mayor frecuencia que otros. ";
-      texto += "Esto convierte a RESPONSE en una especie de indicador de salida que resume el efecto combinado de todas esas columnas, y a los patrones detectados en un punto de partida útil para explorar con más detalle qué configuraciones experimentales están detrás de los mejores y peores desempeños.\n";
-
-      return texto;
-    }
   </script>
-    </body>
+</body>
 </html>
