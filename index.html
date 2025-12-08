@@ -8,11 +8,17 @@
   <!-- PapaParse para procesar CSV en el navegador -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
+  <!-- Chart.js para los gráficos de la sección 7 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- jsPDF para generar el PDF de las secciones 6 y 7 -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
   <style>
     :root{
       --bg:#020617;
       --card:#020617;
-      --border:1f2937;
+      --border:#1f2937;
       --accent:#22d3ee;
       --accent2:#4ade80;
       --text:#e5e7eb;
@@ -73,6 +79,17 @@
       border:1px dashed var(--border);
       background:#020617;
       color:var(--muted);
+      font-size:0.85rem;
+    }
+    /* NUEVO: campos de texto y selects */
+    input[type="text"],
+    select{
+      width:100%;
+      padding:8px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#020617;
+      color:var(--text);
       font-size:0.85rem;
     }
     textarea{
@@ -180,6 +197,19 @@
     #textOutput{
       max-height:60vh;
       overflow-y:auto;
+    }
+    /* NUEVO: contenedor gráfico sección 7 */
+    .chart-wrapper{
+      margin-top:8px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#020617;
+      padding:8px 10px;
+      height:260px;
+    }
+    #chartCanvas{
+      width:100%;
+      height:100%;
     }
   </style>
 </head>
@@ -319,9 +349,50 @@
       <div id="textOutput" class="output-box">
         // Aquí se generará una explicación automática extensa producida por el LLM, usando el resumen numérico y tu prompt de análisis.
       </div>
+
+      <!-- NUEVO: título para el PDF + botón de descarga -->
+      <div class="row">
+        <div>
+          <label for="reportTitle" class="small">
+            Título del reporte (se usará como título en el PDF y en el nombre del archivo)
+          </label>
+          <input id="reportTitle"
+                 type="text"
+                 placeholder="Ejemplo: Informe de desempeño de productos Consumertec" />
+        </div>
+        <div style="flex:0 0 auto;">
+          <button class="btn secondary" type="button" onclick="descargarPDF()">
+            Descargar secciones 6 y 7 (.pdf)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- NUEVA SECCIÓN 7: gráficos a partir del resumen numérico -->
+    <div>
+      <div class="section-title">7. Visualización gráfica de los resultados</div>
+      <p class="small">
+        Estos gráficos se generan automáticamente a partir del resumen numérico de la sección 5.
+        Después de ejecutar un análisis, puedes elegir si ver el gráfico en barras o en líneas.
+      </p>
+      <div class="row">
+        <div>
+          <label for="chartType">Tipo de gráfico</label>
+          <select id="chartType" onchange="cambiarTipoGrafico()">
+            <option value="bar">Barras</option>
+            <option value="line">Líneas</option>
+          </select>
+        </div>
+        <div id="chartStatus" class="status">
+          ⚠️ Aún no hay datos para graficar. Ejecuta un análisis primero.
+        </div>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="chartCanvas"></canvas>
+      </div>
     </div>
   </div>
-  <!-- Lógica: CSV + análisis interno + LLM -->
+  <!-- Lógica: CSV + análisis interno + LLM + gráficos + PDF -->
   <script>
     // ============================================================
     //  Backend LLM (FastAPI en Hugging Face) para sección 6
@@ -335,6 +406,10 @@
     let csvHeaders = null;
     let analysisMode = null;       // 'comparaciones', 'whiteness', 'resumen', 'response_rel'
     let currentPromptKey = null;   // identifica el prompt específico
+
+    // NUEVO: estado gráfico (sección 7)
+    let chartInstance = null;
+    let lastChartData = null;      // { labels, values, datasetLabel, title, xLabel, yLabel }
 
     // Tipos de análisis detectados como compatibles
     const tiposDisponibles = {
@@ -355,6 +430,102 @@
     const fileStatusEl = document.getElementById("fileStatus");
     const csvLabelEl   = document.getElementById("csvLabel");
     const modeStatusEl = document.getElementById("modeStatus");
+
+    // -------------------------------------------------------------
+    // Helpers para sección 7 (gráficos)
+    // -------------------------------------------------------------
+    function prepararDatosGrafico(data) {
+      lastChartData = data || null;
+      const chartStatusEl = document.getElementById("chartStatus");
+      if (!lastChartData || !lastChartData.labels || !lastChartData.labels.length) {
+        if (chartStatusEl) {
+          chartStatusEl.textContent = "⚠️ No se generaron datos suficientes para graficar.";
+        }
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        return;
+      }
+      if (chartStatusEl) {
+        chartStatusEl.textContent = "✅ Datos listos para graficar: " +
+          (lastChartData.title || "gráfico a partir del resumen numérico.");
+      }
+      renderChartInternal();
+    }
+
+    function renderChartInternal() {
+      const canvas = document.getElementById("chartCanvas");
+      const chartTypeEl = document.getElementById("chartType");
+      const chartStatusEl = document.getElementById("chartStatus");
+
+      if (!canvas || !lastChartData || !lastChartData.labels || !lastChartData.labels.length) {
+        if (chartStatusEl) {
+          chartStatusEl.textContent = "⚠️ Aún no hay datos para graficar. Ejecuta un análisis primero.";
+        }
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+
+      const tipo = chartTypeEl ? chartTypeEl.value : "bar";
+
+      chartInstance = new Chart(ctx, {
+        type: tipo,
+        data: {
+          labels: lastChartData.labels,
+          datasets: [{
+            label: lastChartData.datasetLabel || "Valores",
+            data: lastChartData.values,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true },
+            title: {
+              display: !!lastChartData.title,
+              text: lastChartData.title
+            }
+          },
+          scales: {
+            x: {
+              title: {
+                display: !!lastChartData.xLabel,
+                text: lastChartData.xLabel
+              },
+              ticks: {
+                autoSkip: true,
+                maxRotation: 45,
+                minRotation: 0
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: !!lastChartData.yLabel,
+                text: lastChartData.yLabel
+              }
+            }
+          }
+        }
+      });
+
+      if (chartStatusEl) {
+        chartStatusEl.textContent = "✅ Gráfico actualizado correctamente.";
+      }
+    }
+
+    function cambiarTipoGrafico() {
+      renderChartInternal();
+    }
+    window.cambiarTipoGrafico = cambiarTipoGrafico;
 
     // -------------------------------------------------------------
     // Actualizar visibilidad de grupos de prompts
@@ -416,6 +587,17 @@
       questionEl.value = "";
       questionEl.placeholder =
         "Tras subir el CSV y elegir un tipo de análisis en la sección 2, aquí se cargará el prompt correspondiente…";
+
+      // Reset gráfico
+      lastChartData = null;
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+      const chartStatusEl = document.getElementById("chartStatus");
+      if (chartStatusEl) {
+        chartStatusEl.textContent = "⚠️ Aún no hay datos para graficar. Ejecuta un análisis primero.";
+      }
 
       if (!file) {
         fileStatusEl.textContent = "⚠️ Ningún archivo seleccionado.";
@@ -746,6 +928,17 @@
       textEl.textContent =
         "// Esperando respuesta del LLM (sección 6)…";
 
+      // Reset gráfico antes de cada nuevo análisis
+      lastChartData = null;
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+      const chartStatusEl = document.getElementById("chartStatus");
+      if (chartStatusEl) {
+        chartStatusEl.textContent = "⏳ Preparando datos para posibles gráficos…";
+      }
+
       const usarBackendLLM = true;  // SIEMPRE LLM para la explicación
 
       if (analysisMode === "whiteness") {
@@ -792,6 +985,7 @@
             statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
             numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
             textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión con el LLM.";
+            prepararDatosGrafico(null);
             return;
           }
 
@@ -810,6 +1004,16 @@
           // 👉 Sección 5 SIEMPRE usa este cálculo interno
           numericEl.textContent = numTxt;
 
+          // 👉 Sección 7: gráfico de barras/líneas de conteos por PRODUCT_TEST
+          prepararDatosGrafico({
+            labels: ordenados.map(([prod]) => prod),
+            values: ordenados.map(([, cnt]) => cnt),
+            datasetLabel: "Resultados favorables",
+            title: "Resultados favorables por PRODUCT_TEST",
+            xLabel: "PRODUCT_TEST",
+            yLabel: "Número de resultados favorables"
+          });
+
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
             statusEl.textContent = "✅ Análisis de comparaciones numérico generado. Esperando respuesta del LLM en la sección 6…";
@@ -819,6 +1023,7 @@
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
           numericEl.textContent = "// Error al procesar el archivo.";
           textEl.textContent = "";
+          prepararDatosGrafico(null);
         }
       });
     }
@@ -880,6 +1085,7 @@
             statusEl.textContent = "❌ No se encontraron datos válidos de blancura por MONITOR.";
             numericEl.textContent = "// Sin resultados de métricas de blancura.";
             textEl.textContent = "// No hay suficientes datos de blancura para generar una conclusión con el LLM.";
+            prepararDatosGrafico(null);
             return;
           }
 
@@ -924,6 +1130,16 @@
           // 👉 Sección 5 SIEMPRE interno
           numericEl.textContent = numTxt;
 
+          // 👉 Sección 7: gráfico de apariciones como máximo por PRODUCT
+          prepararDatosGrafico({
+            labels: globalSorted.map(([prod]) => prod),
+            values: globalSorted.map(([, cnt]) => cnt),
+            datasetLabel: "Apariciones como máximo de blancura",
+            title: "Apariciones como máximo de blancura por PRODUCT",
+            xLabel: "PRODUCT",
+            yLabel: "Número de apariciones como máximo"
+          });
+
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "whiteness");
             statusEl.textContent = "✅ Análisis de blancura numérico generado. Esperando respuesta del LLM en la sección 6…";
@@ -933,6 +1149,7 @@
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
           numericEl.textContent = "// Error al procesar el archivo.";
           textEl.textContent = "";
+          prepararDatosGrafico(null);
         }
       });
     }
@@ -991,6 +1208,7 @@
             statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
             numericEl.textContent = "// Sin información estructural disponible.";
             textEl.textContent = "// No hay suficiente información para generar un resumen con el LLM.";
+            prepararDatosGrafico(null);
             return;
           }
 
@@ -1036,6 +1254,21 @@
           // 👉 Sección 5 SIEMPRE el mismo resumen interno
           numericEl.textContent = numTxt;
 
+          // 👉 Sección 7: gráfico simple de densidad de datos por columna
+          const labels = headersLocal;
+          const values = headersLocal.map(col => {
+            const s = stats[col] || { numericCount: 0, nonNumericCount: 0 };
+            return (s.numericCount || 0) + (s.nonNumericCount || 0);
+          });
+          prepararDatosGrafico({
+            labels,
+            values,
+            datasetLabel: "Valores no vacíos",
+            title: "Valores no vacíos por columna",
+            xLabel: "Columnas",
+            yLabel: "Número de valores no vacíos"
+          });
+
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "resumen");
             statusEl.textContent = "✅ Resumen numérico generado. Esperando respuesta del LLM en la sección 6…";
@@ -1045,6 +1278,7 @@
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
           numericEl.textContent = "// Error al procesar el archivo.";
           textEl.textContent = "";
+          prepararDatosGrafico(null);
         }
       });
     }
@@ -1093,6 +1327,7 @@
             statusEl.textContent = "❌ No se pudo detectar estructura válida en el CSV.";
             numericEl.textContent = "// Sin información estructural disponible.";
             textEl.textContent = "// No hay suficiente información para analizar RESPONSE con el LLM.";
+            prepararDatosGrafico(null);
             return;
           }
 
@@ -1134,6 +1369,16 @@
           // 👉 Sección 5 SIEMPRE interna
           numericEl.textContent = numTxt;
 
+          // 👉 Sección 7: gráfico de distribución de RESPONSE
+          prepararDatosGrafico({
+            labels: sortedResponses.map(([r]) => r),
+            values: sortedResponses.map(([, c]) => c),
+            datasetLabel: "Número de filas",
+            title: "Distribución de RESPONSE",
+            xLabel: "Valores de RESPONSE",
+            yLabel: "Número de filas"
+          });
+
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "response_rel");
             statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas (numérico) generado. Esperando respuesta del LLM en la sección 6…";
@@ -1143,9 +1388,85 @@
           statusEl.textContent = "❌ Error al leer el CSV: " + err;
           numericEl.textContent = "// Error al procesar el archivo.";
           textEl.textContent = "";
+          prepararDatosGrafico(null);
         }
       });
     }
+
+    // -------------------------------------------------------------
+    // NUEVO: Generar PDF con secciones 6 y 7
+    // -------------------------------------------------------------
+    function descargarPDF() {
+      const textEl = document.getElementById("textOutput");
+      const titleInput = document.getElementById("reportTitle");
+      const canvas = document.getElementById("chartCanvas");
+
+      const { jsPDF } = window.jspdf || {};
+      if (!jsPDF) {
+        alert("No se pudo cargar jsPDF. Verifica la conexión a internet.");
+        return;
+      }
+
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const margin = 40;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      const titulo = (titleInput && titleInput.value.trim())
+        ? titleInput.value.trim()
+        : "Reporte de análisis de Consumertec";
+
+      let y = margin + 10;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text(titulo, margin, y);
+      y += 24;
+
+      // Sección 6: texto
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+
+      const contenido = textEl ? (textEl.textContent || "").trim() : "";
+      const textoReporte = contenido || "Sin contenido en la sección 6.";
+
+      const maxWidth = pageWidth - margin * 2;
+      const lineas = doc.splitTextToSize(textoReporte, maxWidth);
+
+      lineas.forEach(linea => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.text(linea, margin, y);
+        y += 14;
+      });
+
+      // Sección 7: gráfico (si existe)
+      if (chartInstance && canvas) {
+        const imgData = chartInstance.toBase64Image(); // PNG base64
+        const imgWidth = pageWidth - margin * 2;
+        const imgHeight = imgWidth * (canvas.height / canvas.width || 0.6);
+
+        if (y + imgHeight > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text("Visualización gráfica de resultados (Sección 7)", margin, y);
+        y += 18;
+
+        doc.addImage(imgData, "PNG", margin, y, imgWidth, imgHeight);
+        y += imgHeight + 10;
+      }
+
+      const fileNameSafe = titulo.replace(/[\\\/:*?"<>|]+/g, "_");
+      doc.save(fileNameSafe + ".pdf");
+    }
+
+    window.descargarPDF = descargarPDF;
   </script>
 </body>
 </html>
