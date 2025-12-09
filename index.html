@@ -222,15 +222,17 @@
       el archivo CSV que se desea analizar. A partir de su estructura, en la <strong>sección 2</strong> se
       activan los <strong>prompts internos</strong> compatibles (comparaciones, blancura, resumen general,
       relación de RESPONSE con las demás columnas o sus variantes avanzadas). Después se ejecuta el análisis:
-      el sistema genera un <strong>resumen numérico en el navegador (sección 5)</strong> y, con ese resumen
-      más tu prompt de análisis, se llama a un <strong>LLM en Hugging Face</strong> para construir la
-      explicación extensa en la <strong>sección 6</strong>.
+      el sistema genera un <strong>resumen numérico en el navegador (sección 5)</strong> para que puedas ver
+      la foto técnica de la tabla, pero la explicación extensa de la <strong>sección 6</strong> se construye
+      exclusivamente a partir de tu <strong>prompt de la sección 3</strong> y del modo de análisis elegido,
+      sin utilizar el texto del resumen numérico.
     </p>
 
     <!-- Estado del motor -->
     <div id="llmStatus" class="status small">
-      ℹ️ El análisis numérico se hace en el navegador (sección 5) y siempre se envía el resumen numérico
-      junto con tu prompt de análisis a un backend LLM en Hugging Face para generar la sección 6.
+      ℹ️ El análisis numérico se hace en el navegador (sección 5) sólo como referencia técnica.
+      La explicación extensa de la sección 6 se genera en un backend LLM en Hugging Face que usa
+      únicamente tu prompt de la sección 3 (sin leer el texto de la sección 5).
     </div>
 
     <!-- Subir CSV (SECCIÓN 1) -->
@@ -249,8 +251,8 @@
       <p class="small">
         Después de subir el CSV, se mostrarán aquí los tipos de análisis compatibles. Cada tipo activa sus
         prompts internos. El prompt seleccionado se mostrará en la <strong>sección 3</strong> (puedes editarlo)
-        y se usará junto con el resumen numérico como entrada para el LLM que genera la explicación de la
-        <strong>sección 6</strong>.
+        y se usará como única entrada conceptual para el LLM que genera la explicación de la
+        <strong>sección 6</strong>. La sección 5 queda como apoyo numérico visual para ti.
       </p>
 
       <div class="mode-options">
@@ -321,8 +323,9 @@
       <div class="section-title">3. Prompt de análisis</div>
       <label for="question">
         El prompt se rellenará automáticamente según el análisis elegido, pero puedes editarlo libremente.
-        Este texto se enviará junto con el <strong>resumen numérico</strong> al backend LLM para generar
-        la explicación de la sección 6.
+        Este texto se enviará al <strong>backend LLM</strong> como instrucción principal para generar
+        la explicación de la sección 6. La sección 5 se mantiene como resumen numérico separado,
+        que el modelo no lee directamente.
       </label>
       <textarea id="question" placeholder="Sube un CSV y elige un tipo de análisis; aquí aparecerá el prompt asociado, que podrás ajustar…"></textarea>
       <div class="row">
@@ -347,7 +350,7 @@
     <div>
       <div class="section-title">6. Explicación en texto continuo (respuesta extendida)</div>
       <div id="textOutput" class="output-box">
-        // Aquí se generará una explicación automática extensa producida por el LLM, usando el resumen numérico y tu prompt de análisis.
+        // Aquí se generará una explicación automática extensa producida por el LLM, usando únicamente tu prompt de análisis (la sección 5 queda como referencia numérica aparte).
       </div>
 
       <!-- NUEVO: título para el PDF + botón de descarga -->
@@ -374,6 +377,7 @@
       <p class="small">
         Estos gráficos se generan automáticamente a partir del resumen numérico de la sección 5.
         Después de ejecutar un análisis, puedes elegir si ver el gráfico en barras o en líneas.
+        El LLM no usa estos gráficos; son una ayuda visual para interpretar los resultados.
       </p>
       <div class="row">
         <div>
@@ -397,7 +401,7 @@
     // ============================================================
     //  Backend LLM (FastAPI en Hugging Face) para sección 6
     // ============================================================
-    const BACKEND_URL = "https://alexacido-consumertec-llm.hf.space/generate_answer";
+   const BACKEND_URL = "https://alexacido-llm-consumertec.hf.space/generate_answer";
 
     // -------------------------------------------------------------
     // Estado global
@@ -563,7 +567,7 @@
       } else {
         modeStatusEl.textContent =
           "CSV cargado. Análisis disponibles: " + activos.join(" • ") +
-          ". El análisis numérico se hará en la sección 5 y el LLM generará la explicación en la 6.";
+          ". La sección 5 mostrará el resumen numérico y la 6 la interpretación generada con tu prompt.";
       }
     }
 
@@ -821,7 +825,9 @@
 
       if (llmStatusEl) {
         llmStatusEl.textContent =
-          "✅ El resumen numérico se calcula en el navegador (sección 5) y siempre se envía al backend /generate_answer junto con tu prompt para generar la sección 6.";
+          "✅ El resumen numérico se calcula en la sección 5 solo como apoyo visual. " +
+          "La explicación de la sección 6 se generará con tu prompt y el modo de análisis, " +
+          "sin utilizar directamente el texto del resumen numérico.";
       }
     }
 
@@ -837,7 +843,7 @@
       if (!textEl) return;
 
       const pregunta = (userPrompt || "").trim();
-      const resumen  = (numericSummary || "").trim();
+      const resumen  = (numericSummary || "").trim();  // se envía pero el backend lo ignorará
 
       textEl.textContent = "⏳ Llamando al backend /generate_answer…";
 
@@ -860,7 +866,7 @@
           textEl.textContent =
             "❌ Error llamando al backend.\n" +
             msg +
-            "\n\nPuedes revisar el resumen numérico en la sección 5 y, si lo deseas, copiarlo en tu propio análisis.";
+            "\n\nPuedes revisar el resumen numérico en la sección 5 y, si lo deseas, hacer tu propia interpretación manual.";
           if (llmStatusEl) {
             llmStatusEl.textContent = "❌ Backend /generate_answer respondió con error " + resp.status + ".";
           }
@@ -880,7 +886,8 @@
         } else {
           textEl.textContent = answer;
           if (llmStatusEl) {
-            llmStatusEl.textContent = "✅ Respuesta generada por el backend /generate_answer (sección 6).";
+            llmStatusEl.textContent =
+              "✅ Respuesta generada por el backend /generate_answer usando tu prompt (la sección 5 no se ha utilizado como contexto para el modelo).";
           }
         }
       } catch (err) {
@@ -897,7 +904,7 @@
     // -------------------------------------------------------------
     // Botón principal: analizar CSV
     //   - SIEMPRE: sección 5 numérico en navegador
-    //   - SIEMPRE: sección 6 LLM
+    //   - SIEMPRE: sección 6 LLM (solo con el prompt)
     // -------------------------------------------------------------
     function analizarCSVInternal() {
       const statusEl  = document.getElementById("analysisStatus");
@@ -921,7 +928,7 @@
       }
 
       statusEl.textContent =
-        "⏳ Analizando CSV en el navegador y preparando envío al LLM…";
+        "⏳ Analizando CSV en el navegador (sección 5) y preparando la llamada al LLM con tu prompt…";
 
       numericEl.textContent =
         "// Procesando CSV para generar el resumen técnico…";
@@ -954,14 +961,34 @@
 
     window.analizarCSV = analizarCSVInternal;
 
-    // -------------------------------------------------------------
-    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE
+      // -------------------------------------------------------------
+    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (versión avanzada)
+    //   - Mantiene los recuentos absolutos
+    //   - Añade tasas de desempeño por producto
+    //   - Estima significancia (z-score vs tasa global)
+    //   - Analiza contextos (MODALITY, SCENARIOS, WASH, PROCESS)
+    //     como posibles efectos de confusión
     // -------------------------------------------------------------
     function analizarComparaciones(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
       const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
-      const conteos = {};
-      let totalFilas = 0;
-      let totalFiltradas = 0;
+
+      // Favorables por PRODUCT_TEST (como antes)
+      const conteosFavorables = {};
+      // Total de comparaciones por PRODUCT_TEST (para tasas)
+      const totalPorProducto = {};
+
+      // Contextos para interrelación / posibles efectos de confusión
+      // Para cada variable de contexto guardamos total y favorables
+      const contextoStats = {
+        MODALITY: {},
+        SCENARIOS: {},
+        WASH: {},
+        PROCESS: {}
+      };
+
+      let totalFilas = 0;        // filas totales leídas del CSV
+      let totalComparaciones = 0; // filas con PRODUCT_TEST definido
+      let totalFiltradas = 0;    // filas con RESPONSE favorable
 
       Papa.parse(csvFile, {
         header: true,
@@ -972,16 +999,40 @@
           const rows = results.data;
           for (const row of rows) {
             totalFilas++;
+
+            const ptestRaw = row["PRODUCT_TEST"];
+            const ptest = (ptestRaw || "").trim() || "(VACÍO)";
+            if (ptest) {
+              totalComparaciones++;
+              totalPorProducto[ptest] = (totalPorProducto[ptest] || 0) + 1;
+            }
+
             const resp = (row["RESPONSE"] || "").trim();
-            if (objetivos.has(resp)) {
+            const esFavorable = objetivos.has(resp);
+
+            if (esFavorable) {
               totalFiltradas++;
-              const ptest = (row["PRODUCT_TEST"] || "").trim() || "(VACÍO)";
-              conteos[ptest] = (conteos[ptest] || 0) + 1;
+              if (ptest) {
+                conteosFavorables[ptest] = (conteosFavorables[ptest] || 0) + 1;
+              }
+            }
+
+            // Actualizar contextos: MODALITY, SCENARIOS, WASH, PROCESS
+            for (const ctxName of Object.keys(contextoStats)) {
+              const vRaw = row[ctxName];
+              const v = (vRaw || "").trim() || "(VACÍO)";
+              if (!contextoStats[ctxName][v]) {
+                contextoStats[ctxName][v] = { total: 0, fav: 0 };
+              }
+              contextoStats[ctxName][v].total++;
+              if (esFavorable) {
+                contextoStats[ctxName][v].fav++;
+              }
             }
           }
         },
         complete: function() {
-          if (Object.keys(conteos).length === 0) {
+          if (!Object.keys(conteosFavorables).length) {
             statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
             numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
             textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión con el LLM.";
@@ -989,25 +1040,192 @@
             return;
           }
 
-          const ordenados = Object.entries(conteos).sort((a,b) => b[1] - a[1]);
-          const totalFavorables = ordenados.reduce((s, [,c]) => s + c, 0);
+          // -------------------------------------------------------
+          // 1) Medidas básicas globales
+          // -------------------------------------------------------
+          const totalFavorables = Object.values(conteosFavorables)
+            .reduce((s, c) => s + c, 0);
 
-          let numTxt = "";
-          numTxt += "Total de filas leídas: " + totalFilas + "\n";
-          numTxt += "Filas con RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}: " + totalFiltradas + "\n\n";
-          numTxt += "Conteo de resultados favorables por PRODUCT_TEST:\n";
-          for (const [prod, cnt] of ordenados) {
-            const pct = totalFavorables > 0 ? (cnt * 100 / totalFavorables).toFixed(2) + "%" : "–";
-            numTxt += "  - " + prod + ": " + cnt + " (" + pct + " de los favorables)\n";
+          const tasaGlobal = (totalComparaciones > 0)
+            ? (totalFavorables / totalComparaciones)
+            : 0;
+
+          // Helper para porcentajes
+          const formatPct = (v) => (v * 100).toFixed(2) + "%";
+
+          // -------------------------------------------------------
+          // 2) Medidas cuantitativas de desempeño por PRODUCT_TEST
+          //    (tasa favorable, diferencia vs global, z-score, IC)
+          // -------------------------------------------------------
+          const productos = Object.keys(totalPorProducto).map(prod => {
+            const n = totalPorProducto[prod] || 0;
+            const k = conteosFavorables[prod] || 0;
+            const tasa = n > 0 ? (k / n) : 0;
+            const diff = tasa - tasaGlobal;
+
+            let z = null;
+            let ciLow = null;
+            let ciHigh = null;
+
+            if (n > 0 && tasaGlobal > 0 && tasaGlobal < 1) {
+              const se = Math.sqrt(tasaGlobal * (1 - tasaGlobal) / n);
+              if (se > 0) {
+                z = diff / se;
+                const half = 1.96 * se;
+                ciLow = tasa - half;
+                ciHigh = tasa + half;
+              }
+            }
+
+            return { prod, n, k, tasa, diff, z, ciLow, ciHigh };
+          });
+
+          // Ordenamos por tasa favorable descendente
+          productos.sort((a, b) => b.tasa - a.tasa);
+
+          // -------------------------------------------------------
+          // 3) Interrelación y posibles efectos de confusión
+          //    (contextos con tasas muy altas o muy bajas)
+          // -------------------------------------------------------
+          const contextoResumen = [];
+
+          for (const ctxName of Object.keys(contextoStats)) {
+            const mapa = contextoStats[ctxName];
+            const arr = Object.entries(mapa).map(([valor, st]) => {
+              const tasaCtx = st.total > 0 ? (st.fav / st.total) : 0;
+              const diffCtx = tasaCtx - tasaGlobal;
+              return {
+                valor,
+                total: st.total,
+                fav: st.fav,
+                tasa: tasaCtx,
+                diff: diffCtx
+              };
+            });
+
+            // Filtramos para evitar ruido extremo (muy pocos casos)
+            const arrFiltrado = arr.filter(x => x.total >= 20);
+
+            // Contextos con tasas muy por encima de la media
+            const topAltos = arrFiltrado
+              .filter(x => x.diff > 0)
+              .sort((a, b) => b.diff - a.diff)
+              .slice(0, 3);
+
+            // Contextos con tasas muy por debajo de la media
+            const topBajos = arrFiltrado
+              .filter(x => x.diff < 0)
+              .sort((a, b) => a.diff - b.diff)
+              .slice(0, 3);
+
+            contextoResumen.push({
+              ctxName,
+              altos: topAltos,
+              bajos: topBajos
+            });
           }
 
-          // 👉 Sección 5 SIEMPRE usa este cálculo interno
+          // -------------------------------------------------------
+          // 4) Construcción del TEXTO de la sección 5
+          // -------------------------------------------------------
+          let numTxt = "";
+
+          // 4.1 Panorama global
+          numTxt += "PANORAMA GLOBAL DE LAS COMPARACIONES\n";
+          numTxt += "------------------------------------\n";
+          numTxt += "Total de filas leídas en el CSV: " + totalFilas + "\n";
+          numTxt += "Total de comparaciones con PRODUCT_TEST definido: " + totalComparaciones + "\n";
+          numTxt += "Filas con RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}: " + totalFiltradas + "\n";
+          numTxt += "Tasa global de resultados favorables: " + formatPct(tasaGlobal) + "\n\n";
+
+          // 4.2 Medidas cuantitativas por producto
+          numTxt += "MEDIDAS CUANTITATIVAS DE DESEMPEÑO POR PRODUCT_TEST\n";
+          numTxt += "---------------------------------------------------\n";
+          numTxt += "Ordenado por tasa favorable (k/n), con indicador de significancia aproximada vs tasa global.\n";
+          numTxt += "Las tasas se expresan como proporción de comparaciones en las que el producto resulta favorable.\n\n";
+          numTxt += "Producto | n total | k favorables | Tasa favorable | Diferencia vs global | z-score | IC 95% aprox.\n";
+          numTxt += "---------|---------|-------------|----------------|----------------------|---------|----------------\n";
+
+          productos.forEach(p => {
+            const diffPct = (p.diff * 100).toFixed(2);
+            const zTxt = (p.z === null) ? "NA" : p.z.toFixed(2);
+
+            let icTxt = "NA";
+            if (p.ciLow !== null && p.ciHigh !== null) {
+              const low = Math.max(0, Math.min(1, p.ciLow));
+              const high = Math.max(0, Math.min(1, p.ciHigh));
+              icTxt = "[" + formatPct(low) + " ; " + formatPct(high) + "]";
+            }
+
+            numTxt +=
+              p.prod + " | " +
+              p.n + " | " +
+              p.k + " | " +
+              formatPct(p.tasa) + " | " +
+              (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p. | " +
+              zTxt + " | " +
+              icTxt + "\n";
+          });
+
+          numTxt += "\n";
+          numTxt += "Interpretación rápida del z-score:\n";
+          numTxt += "- |z| ≈ 0–1.5: diferencias pequeñas o poco claras.\n";
+          numTxt += "- |z| ≈ 1.5–2.0: tendencia a diferencia, pero con incertidumbre.\n";
+          numTxt += "- |z| ≥ 2.0: posible diferencia estadísticamente relevante frente a la tasa global.\n\n";
+
+          // 4.3 Interrelación entre variables y posibles efectos de confusión
+          numTxt += "INTERRELACIÓN ENTRE VARIABLES Y POSIBLES EFECTOS DE CONFUSIÓN\n";
+          numTxt += "------------------------------------------------------------\n";
+          numTxt += "Se exploran MODALITY, SCENARIOS, WASH y PROCESS como contextos que pueden favorecer o penalizar\n";
+          numTxt += "la tasa de resultados favorables frente a la tasa global.\n\n";
+
+          contextoResumen.forEach(ctx => {
+            numTxt += "Variable de contexto: " + ctx.ctxName + "\n";
+
+            if (ctx.altos.length) {
+              numTxt += "  Contextos con tasa favorable claramente superior a la media global:\n";
+              ctx.altos.forEach(c => {
+                const diffPct = (c.diff * 100).toFixed(2);
+                numTxt +=
+                  "    - " + c.valor +
+                  " | n=" + c.total +
+                  ", favorables=" + c.fav +
+                  ", tasa=" + formatPct(c.tasa) +
+                  ", diferencia vs global=" +
+                  (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p.\n";
+              });
+            } else {
+              numTxt += "  No se observaron contextos con tasas muy por encima de la media (con n≥20).\n";
+            }
+
+            if (ctx.bajos.length) {
+              numTxt += "  Contextos con tasa favorable claramente por debajo de la media global:\n";
+              ctx.bajos.forEach(c => {
+                const diffPct = (c.diff * 100).toFixed(2);
+                numTxt +=
+                  "    - " + c.valor +
+                  " | n=" + c.total +
+                  ", favorables=" + c.fav +
+                  ", tasa=" + formatPct(c.tasa) +
+                  ", diferencia vs global=" + diffPct + " p.p.\n";
+              });
+            } else {
+              numTxt += "  No se observaron contextos con tasas muy por debajo de la media (con n≥20).\n";
+            }
+
+            numTxt += "\n";
+          });
+
+          // 👉 Sección 5 SIEMPRE usa este cálculo interno enriquecido
           numericEl.textContent = numTxt;
 
-          // 👉 Sección 7: gráfico de barras/líneas de conteos por PRODUCT_TEST
+          // 👉 Sección 7: gráfico de barras/líneas de conteos por PRODUCT_TEST (como antes)
+          const ordenadosPorFavorable = Object.entries(conteosFavorables)
+            .sort((a, b) => b[1] - a[1]);
+
           prepararDatosGrafico({
-            labels: ordenados.map(([prod]) => prod),
-            values: ordenados.map(([, cnt]) => cnt),
+            labels: ordenadosPorFavorable.map(([prod]) => prod),
+            values: ordenadosPorFavorable.map(([, cnt]) => cnt),
             datasetLabel: "Resultados favorables",
             title: "Resultados favorables por PRODUCT_TEST",
             xLabel: "PRODUCT_TEST",
@@ -1015,8 +1233,12 @@
           });
 
           if (usarBackendLLM) {
+            // Seguimos enviando numTxt por si en el futuro quieres que el backend lo use,
+            // aunque actualmente el modelo solo se guía por el prompt de la sección 3.
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
-            statusEl.textContent = "✅ Análisis de comparaciones numérico generado. Esperando respuesta del LLM en la sección 6…";
+            statusEl.textContent =
+              "✅ Análisis de comparaciones numérico avanzado generado. " +
+              "Esperando respuesta del LLM en la sección 6…";
           }
         },
         error: function(err) {
@@ -1027,6 +1249,7 @@
         }
       });
     }
+
 
     // -------------------------------------------------------------
     // Modo 2: Blancura por MONITOR
