@@ -1251,12 +1251,28 @@
     }
 
 
-    // -------------------------------------------------------------
-    // Modo 2: Blancura por MONITOR
+       // -------------------------------------------------------------
+    // Modo 2: Blancura por MONITOR (versión avanzada)
+    //   - Mantiene máximos por MONITOR y métrica (como antes)
+    //   - Añade medias globales y por PRODUCT para cada métrica
+    //   - Estima significancia (z-score) de la media por producto
+    //     frente a la media global para cada métrica
+    //   - Analiza MONITOR como posible fuente de confusión
     // -------------------------------------------------------------
     function analizarBlancura(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
-      const data = {};
+      const dataMax = {};           // máximos por MONITOR y métrica
+      const globalAgg = {};         // métrica -> {sum, sumsq, count}
+      const prodAgg = {};           // PRODUCT -> métrica -> {sum, sumsq, count}
+      const monitorAgg = {};        // MONITOR -> métrica -> {sum, sumsq, count}
+      const globalCountsMax = {};   // conteo de apariciones como máximo (como antes)
+
       let totalFilas = 0;
+
+      const ensureAgg = (agg, key1, key2) => {
+        if (!agg[key1]) agg[key1] = {};
+        if (!agg[key1][key2]) agg[key1][key2] = { sum: 0, sumsq: 0, count: 0 };
+        return agg[key1][key2];
+      };
 
       Papa.parse(csvFile, {
         header: true,
@@ -1276,10 +1292,31 @@
               const v = parseFloat(row[m]);
               if (Number.isNaN(v)) continue;
 
-              if (!data[monitor]) data[monitor] = {};
-              if (!data[monitor][m]) data[monitor][m] = { max: null, rows: [] };
+              // Global
+              if (!globalAgg[m]) {
+                globalAgg[m] = { sum: 0, sumsq: 0, count: 0 };
+              }
+              globalAgg[m].sum += v;
+              globalAgg[m].sumsq += v * v;
+              globalAgg[m].count++;
 
-              const entry = data[monitor][m];
+              // Por producto
+              const pa = ensureAgg(prodAgg, product, m);
+              pa.sum += v;
+              pa.sumsq += v * v;
+              pa.count++;
+
+              // Por monitor
+              const ma = ensureAgg(monitorAgg, monitor, m);
+              ma.sum += v;
+              ma.sumsq += v * v;
+              ma.count++;
+
+              // Máximos por monitor/métrica (como antes)
+              if (!dataMax[monitor]) dataMax[monitor] = {};
+              if (!dataMax[monitor][m]) dataMax[monitor][m] = { max: null, rows: [] };
+
+              const entry = dataMax[monitor][m];
               if (entry.max === null || v > entry.max) {
                 entry.max = v;
                 entry.rows = [{
@@ -1304,7 +1341,7 @@
           }
         },
         complete: function() {
-          if (!Object.keys(data).length) {
+          if (!Object.keys(globalAgg).length) {
             statusEl.textContent = "❌ No se encontraron datos válidos de blancura por MONITOR.";
             numericEl.textContent = "// Sin resultados de métricas de blancura.";
             textEl.textContent = "// No hay suficientes datos de blancura para generar una conclusión con el LLM.";
@@ -1312,24 +1349,168 @@
             return;
           }
 
-          const globalCounts = {};
-          for (const monitor of Object.keys(data)) {
-            const metricsObj = data[monitor];
+          const formatPct = (v) => (v * 100).toFixed(2) + "%";
+
+          // -----------------------------------------
+          // 1) Estadísticos globales por métrica
+          // -----------------------------------------
+          const globalStats = {}; // m -> {mean, sd, count}
+          for (const m of Object.keys(globalAgg)) {
+            const g = globalAgg[m];
+            const mean = g.count > 0 ? (g.sum / g.count) : 0;
+            const varv = g.count > 0 ? Math.max(0, (g.sumsq / g.count) - mean * mean) : 0;
+            const sd = Math.sqrt(varv);
+            globalStats[m] = { mean, sd, count: g.count };
+          }
+
+          // -----------------------------------------
+          // 2) Perfil cuantitativo por PRODUCT
+          // -----------------------------------------
+          const productosStats = {}; // m -> array de {product, n, mean, diff, z}
+          for (const product of Object.keys(prodAgg)) {
+            const metrics = prodAgg[product];
+            for (const m of Object.keys(metrics)) {
+              const a = metrics[m];
+              const g = globalStats[m];
+              if (!g || g.count === 0) continue;
+
+              const meanProd = a.count > 0 ? (a.sum / a.count) : 0;
+              const diff = meanProd - g.mean;
+
+              let z = null;
+              if (a.count > 1 && g.sd > 0) {
+                const se = g.sd / Math.sqrt(a.count);
+                if (se > 0) {
+                  z = diff / se;
+                }
+              }
+
+              if (!productosStats[m]) productosStats[m] = [];
+              productosStats[m].push({
+                product,
+                n: a.count,
+                mean: meanProd,
+                diff,
+                z
+              });
+            }
+          }
+
+          // Ordenamos por métrica y por media desc
+          for (const m of Object.keys(productosStats)) {
+            productosStats[m].sort((a, b) => b.mean - a.mean);
+          }
+
+          // -----------------------------------------
+          // 3) Conteo global de apariciones como máximo (como antes)
+          // -----------------------------------------
+          for (const monitor of Object.keys(dataMax)) {
+            const metricsObj = dataMax[monitor];
             for (const metric of Object.keys(metricsObj)) {
               const info = metricsObj[metric];
               for (const row of info.rows) {
                 const prod = row.PRODUCT || "(VACÍO)";
-                globalCounts[prod] = (globalCounts[prod] || 0) + 1;
+                globalCountsMax[prod] = (globalCountsMax[prod] || 0) + 1;
               }
             }
           }
+          const globalSortedMax = Object.entries(globalCountsMax).sort((a, b) => b[1] - a[1]);
 
+          // -----------------------------------------
+          // 4) Interrelación y confusión por MONITOR
+          // -----------------------------------------
+          const monitorResumen = {}; // m -> {altos:[], bajos:[]}
+          for (const monitor of Object.keys(monitorAgg)) {
+            const metrics = monitorAgg[monitor];
+            for (const m of Object.keys(metrics)) {
+              const a = metrics[m];
+              const g = globalStats[m];
+              if (!g || g.count === 0) continue;
+
+              const meanMon = a.count > 0 ? (a.sum / a.count) : 0;
+              const diff = meanMon - g.mean;
+
+              let z = null;
+              if (a.count > 1 && g.sd > 0) {
+                const se = g.sd / Math.sqrt(a.count);
+                if (se > 0) z = diff / se;
+              }
+
+              if (!monitorResumen[m]) monitorResumen[m] = [];
+              monitorResumen[m].push({
+                monitor,
+                n: a.count,
+                mean: meanMon,
+                diff,
+                z
+              });
+            }
+          }
+
+          const monitorCtx = {};
+          for (const m of Object.keys(monitorResumen)) {
+            const lista = monitorResumen[m].filter(x => x.n >= 10);
+            const altos = lista.filter(x => x.diff > 0)
+              .sort((a, b) => b.diff - a.diff)
+              .slice(0, 3);
+            const bajos = lista.filter(x => x.diff < 0)
+              .sort((a, b) => a.diff - b.diff)
+              .slice(0, 3);
+            monitorCtx[m] = { altos, bajos };
+          }
+
+          // -----------------------------------------
+          // 5) Construcción del TEXTO sección 5
+          // -----------------------------------------
           let numTxt = "";
+
+          numTxt += "PANORAMA GLOBAL DE LAS MÉTRICAS DE BLANCURA\n";
+          numTxt += "-------------------------------------------\n";
           numTxt += "Total de filas leídas: " + totalFilas + "\n\n";
-          numTxt += "Máximos de blancura por MONITOR y métrica:\n";
-          for (const monitor of Object.keys(data).sort()) {
+
+          numTxt += "Estadísticos globales por métrica de blancura:\n";
+          for (const m of whitenessMetrics) {
+            const g = globalStats[m];
+            if (!g) continue;
+            numTxt +=
+              "  - " + m +
+              " | n=" + g.count +
+              " | media global≈ " + g.mean.toFixed(3) +
+              " | desviación estándar≈ " + g.sd.toFixed(3) + "\n";
+          }
+          numTxt += "\n";
+
+          numTxt += "PERFIL CUANTITATIVO DE BLANCURA POR PRODUCTO\n";
+          numTxt += "---------------------------------------------\n";
+          numTxt += "Se muestran medias por producto y métrica, comparadas con la media global (diferencia y z-score aproximado).\n\n";
+
+          for (const m of whitenessMetrics) {
+            const lista = productosStats[m];
+            const g = globalStats[m];
+            if (!lista || !lista.length || !g) continue;
+
+            numTxt += "Métrica: " + m + " (media global≈ " + g.mean.toFixed(3) + ")\n";
+            numTxt += "PRODUCT | n | media producto | diferencia vs global | z-score aprox.\n";
+            numTxt += "--------|---|----------------|----------------------|-----------------\n";
+
+            lista.forEach(p => {
+              const diffTxt = p.diff.toFixed(3);
+              const zTxt = (p.z === null) ? "NA" : p.z.toFixed(2);
+              numTxt +=
+                p.product + " | " +
+                p.n + " | " +
+                p.mean.toFixed(3) + " | " +
+                (p.diff >= 0 ? "+" + diffTxt : diffTxt) + " | " +
+                zTxt + "\n";
+            });
+            numTxt += "\n";
+          }
+
+          numTxt += "MÁXIMOS DE BLANCURA POR MONITOR Y MÉTRICA\n";
+          numTxt += "-----------------------------------------\n";
+          for (const monitor of Object.keys(dataMax).sort()) {
             numTxt += "MONITOR = " + monitor + "\n";
-            const metricsObj = data[monitor];
+            const metricsObj = dataMax[monitor];
             for (const metric of Object.keys(metricsObj)) {
               const info = metricsObj[metric];
               numTxt += "  Métrica: " + metric + ", valor máximo: " + info.max + "\n";
@@ -1345,18 +1526,64 @@
           }
 
           numTxt += "Conteo global de apariciones como máximo de blancura por PRODUCT:\n";
-          const globalSorted = Object.entries(globalCounts).sort((a,b) => b[1] - a[1]);
-          for (const [prod, cnt] of globalSorted) {
+          globalSortedMax.forEach(([prod, cnt]) => {
             numTxt += "  - " + prod + ": " + cnt + "\n";
+          });
+          numTxt += "\n";
+
+          numTxt += "POSSIBLES EFECTOS DE CONFUSIÓN ASOCIADOS A MONITOR\n";
+          numTxt += "--------------------------------------------------\n";
+          numTxt += "Se indica dónde los MONITOR muestran medias muy por encima o por debajo de la media global.\n\n";
+
+          for (const m of whitenessMetrics) {
+            const ctx = monitorCtx[m];
+            const g = globalStats[m];
+            if (!ctx || !g) continue;
+
+            numTxt += "Métrica: " + m + " (media global≈ " + g.mean.toFixed(3) + ")\n";
+
+            if (ctx.altos.length) {
+              numTxt += "  MONITOR con medias de blancura claramente superiores a la global:\n";
+              ctx.altos.forEach(c => {
+                const diffTxt = c.diff.toFixed(3);
+                const zTxt = (c.z === null) ? "NA" : c.z.toFixed(2);
+                numTxt +=
+                  "    - MONITOR=" + c.monitor +
+                  " | n=" + c.n +
+                  " | media≈ " + c.mean.toFixed(3) +
+                  " | diferencia vs global=" + (c.diff >= 0 ? "+" + diffTxt : diffTxt) +
+                  " | z≈ " + zTxt + "\n";
+              });
+            } else {
+              numTxt += "  No se observaron MONITOR con medias muy por encima de la global (n≥10).\n";
+            }
+
+            if (ctx.bajos.length) {
+              numTxt += "  MONITOR con medias de blancura claramente inferiores a la global:\n";
+              ctx.bajos.forEach(c => {
+                const diffTxt = c.diff.toFixed(3);
+                const zTxt = (c.z === null) ? "NA" : c.z.toFixed(2);
+                numTxt +=
+                  "    - MONITOR=" + c.monitor +
+                  " | n=" + c.n +
+                  " | media≈ " + c.mean.toFixed(3) +
+                  " | diferencia vs global=" + diffTxt +
+                  " | z≈ " + zTxt + "\n";
+              });
+            } else {
+              numTxt += "  No se observaron MONITOR con medias muy por debajo de la global (n≥10).\n";
+            }
+
+            numTxt += "\n";
           }
 
-          // 👉 Sección 5 SIEMPRE interno
+          // 👉 Sección 5
           numericEl.textContent = numTxt;
 
-          // 👉 Sección 7: gráfico de apariciones como máximo por PRODUCT
+          // 👉 Sección 7: gráfico de apariciones como máximo por PRODUCT (como antes)
           prepararDatosGrafico({
-            labels: globalSorted.map(([prod]) => prod),
-            values: globalSorted.map(([, cnt]) => cnt),
+            labels: globalSortedMax.map(([prod]) => prod),
+            values: globalSortedMax.map(([, cnt]) => cnt),
             datasetLabel: "Apariciones como máximo de blancura",
             title: "Apariciones como máximo de blancura por PRODUCT",
             xLabel: "PRODUCT",
@@ -1365,7 +1592,8 @@
 
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "whiteness");
-            statusEl.textContent = "✅ Análisis de blancura numérico generado. Esperando respuesta del LLM en la sección 6…";
+            statusEl.textContent =
+              "✅ Análisis de blancura numérico avanzado generado. Esperando respuesta del LLM en la sección 6…";
           }
         },
         error: function(err) {
@@ -1376,8 +1604,7 @@
         }
       });
     }
-
-    // -------------------------------------------------------------
+       // -------------------------------------------------------------
     // Modo 3: Resumen general de la tabla
     // -------------------------------------------------------------
     function analizarResumen(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
@@ -1506,14 +1733,27 @@
       });
     }
 
-    // -------------------------------------------------------------
-    // Modo 4: Comparar RESPONSE con las demás columnas
+
+        // -------------------------------------------------------------
+    // Modo 4: Comparar RESPONSE con las demás columnas (versión avanzada)
+    //   - Mantiene la distribución global de RESPONSE
+    //   - Mantiene las asociaciones básicas columna–valor–RESPONSE
+    //   - Añade medidas cuantitativas de desempeño (tasas favorables)
+    //     usando RESPONSE={01.SUPERIOR,02.SUPERIOR_TREND} como “favorables”
+    //   - Estima significancia (z-score) de esas tasas por contexto
+    //   - Detecta contextos (valores de columnas) que suben/bajan mucho
+    //     la probabilidad de respuesta favorable (efectos de confusión)
     // -------------------------------------------------------------
     function analizarResponseVsOtros(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
+      const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
+
       const responseCounts = {};
       const responseColumnCounts = {};
+      const contextoFavStats = {}; // col -> valor -> {total, fav}
+
       let totalFilas = 0;
       let headersLocal = null;
+      let totalFavorables = 0;
 
       Papa.parse(csvFile, {
         header: true,
@@ -1527,10 +1767,15 @@
           }
           for (const row of rows) {
             totalFilas++;
+
             const rRaw = row["RESPONSE"];
             const resp = (rRaw === undefined || rRaw === null || String(rRaw).trim() === "")
               ? "(VACÍO)" : String(rRaw).trim();
+
             responseCounts[resp] = (responseCounts[resp] || 0) + 1;
+
+            const esFavorable = objetivos.has(resp);
+            if (esFavorable) totalFavorables++;
 
             for (const col of headersLocal) {
               if (col === "RESPONSE") continue;
@@ -1538,10 +1783,17 @@
               const val = (vRaw === undefined || vRaw === null || String(vRaw).trim() === "")
                 ? "(VACÍO)" : String(vRaw).trim();
 
+              // Mapa de valores por RESPONSE (como antes)
               if (!responseColumnCounts[col]) responseColumnCounts[col] = {};
               if (!responseColumnCounts[col][resp]) responseColumnCounts[col][resp] = {};
               responseColumnCounts[col][resp][val] =
                 (responseColumnCounts[col][resp][val] || 0) + 1;
+
+              // Estadísticos de desempeño favorable por contexto
+              if (!contextoFavStats[col]) contextoFavStats[col] = {};
+              if (!contextoFavStats[col][val]) contextoFavStats[col][val] = { total: 0, fav: 0 };
+              contextoFavStats[col][val].total++;
+              if (esFavorable) contextoFavStats[col][val].fav++;
             }
           }
         },
@@ -1554,45 +1806,153 @@
             return;
           }
 
-          const sortedResponses = Object.entries(responseCounts).sort((a,b) => b[1]-a[1]);
+          const sortedResponses = Object.entries(responseCounts).sort((a, b) => b[1] - a[1]);
 
           let numTxt = "";
+
+          // -----------------------------------------
+          // 1) Distribución global de RESPONSE
+          // -----------------------------------------
+          numTxt += "DISTRIBUCIÓN GLOBAL DE RESPONSE\n";
+          numTxt += "--------------------------------\n";
           numTxt += "Total de filas leídas: " + totalFilas + "\n\n";
-          numTxt += "Distribución de la columna RESPONSE:\n";
-          sortedResponses.forEach(([r,c]) => {
-            const pct = totalFilas > 0 ? (c*100/totalFilas).toFixed(2) + "%" : "–";
+
+          sortedResponses.forEach(([r, c]) => {
+            const pct = totalFilas > 0 ? (c * 100 / totalFilas).toFixed(2) + "%" : "–";
             numTxt += "  - " + r + ": " + c + " filas (" + pct + ")\n";
           });
           numTxt += "\n";
 
-          numTxt += "Asociaciones entre RESPONSE y el resto de columnas (primeras 6 columnas distintas de RESPONSE):\n";
-          const colsAnalizar = headersLocal.filter(c => c !== "RESPONSE").slice(0,6);
+          // -----------------------------------------
+          // 2) Asociaciones básicas (como antes)
+          // -----------------------------------------
+          numTxt += "ASOCIACIONES BÁSICAS ENTRE RESPONSE Y OTRAS COLUMNAS\n";
+          numTxt += "----------------------------------------------------\n";
+          numTxt += "Se muestran, para las primeras 6 columnas distintas de RESPONSE, los valores más frecuentes\n";
+          numTxt += "dentro de cada categoría de RESPONSE.\n\n";
 
+          const colsAnalizar = headersLocal.filter(c => c !== "RESPONSE").slice(0, 6);
           const resumenColumnas = [];
 
           colsAnalizar.forEach(col => {
             const byResp = responseColumnCounts[col] || {};
-            numTxt += "\nColumna: " + col + "\n";
+            numTxt += "Columna: " + col + "\n";
             const perResponseTop = {};
             sortedResponses.forEach(([resp, _cntR]) => {
               const mapaValores = byResp[resp];
               if (!mapaValores) return;
-              const sortedVals = Object.entries(mapaValores).sort((a,b) => b[1]-a[1]).slice(0,3);
+              const sortedVals = Object.entries(mapaValores).sort((a, b) => b[1] - a[1]).slice(0, 3);
               if (!sortedVals.length) return;
               perResponseTop[resp] = sortedVals;
 
               numTxt += "  RESPONSE = " + resp + ":\n";
-              sortedVals.forEach(([v,c]) => {
+              sortedVals.forEach(([v, c]) => {
                 numTxt += "    - " + v + " (" + c + " filas)\n";
               });
             });
+            numTxt += "\n";
             resumenColumnas.push({ columna: col, perResponseTop });
           });
 
-          // 👉 Sección 5 SIEMPRE interna
+          // -----------------------------------------
+          // 3) Medidas cuantitativas de desempeño
+          //    y posibles efectos de confusión
+          // -----------------------------------------
+          const objetivosExistentes = totalFavorables > 0;
+          if (objetivosExistentes) {
+            const pGlobal = totalFavorables / totalFilas;
+            const formatPct = (v) => (v * 100).toFixed(2) + "%";
+
+            numTxt += "MEDIDAS CUANTITATIVAS DE DESEMPEÑO (RESPUESTA FAVORABLE)\n";
+            numTxt += "--------------------------------------------------------\n";
+            numTxt += "Se considera como 'respuesta favorable' RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}.\n";
+            numTxt += "Tasa global de respuesta favorable: " + formatPct(pGlobal) + "\n\n";
+
+            numTxt += "INTERRELACIÓN ENTRE VARIABLES Y POSIBLES EFECTOS DE CONFUSIÓN\n";
+            numTxt += "------------------------------------------------------------\n";
+            numTxt += "Para cada una de las primeras 6 columnas se identifican valores de contexto\n";
+            numTxt += "que aumentan o reducen significativamente la probabilidad de respuesta favorable.\n\n";
+
+            colsAnalizar.forEach(col => {
+              const mapa = contextoFavStats[col] || {};
+              const arr = Object.entries(mapa).map(([val, st]) => {
+                const n = st.total;
+                const fav = st.fav;
+                const tasa = n > 0 ? (fav / n) : 0;
+                const diff = tasa - pGlobal;
+                let z = null;
+                if (n > 1 && pGlobal > 0 && pGlobal < 1) {
+                  const se = Math.sqrt(pGlobal * (1 - pGlobal) / n);
+                  if (se > 0) z = diff / se;
+                }
+                return { val, n, fav, tasa, diff, z };
+              });
+
+              const arrFiltrado = arr.filter(x => x.n >= 20); // evitar ruido con pocos casos
+              if (!arrFiltrado.length) return;
+
+              const altos = arrFiltrado
+                .filter(x => x.diff > 0)
+                .sort((a, b) => b.diff - a.diff)
+                .slice(0, 3);
+              const bajos = arrFiltrado
+                .filter(x => x.diff < 0)
+                .sort((a, b) => a.diff - b.diff)
+                .slice(0, 3);
+
+              const formatDiff = (d) => {
+                const v = (d * 100).toFixed(2);
+                return (v >= 0 ? "+" + v : v) + " p.p.";
+              };
+
+              numTxt += "Columna analizada como contexto: " + col + "\n";
+
+              if (altos.length) {
+                numTxt += "  Valores asociados a una tasa de respuesta favorable mayor que la global:\n";
+                altos.forEach(c => {
+                  const zTxt = (c.z === null) ? "NA" : c.z.toFixed(2);
+                  numTxt +=
+                    "    - " + c.val +
+                    " | n=" + c.n +
+                    ", favorables=" + c.fav +
+                    ", tasa=" + formatPct(c.tasa) +
+                    ", diferencia vs global=" + formatDiff(c.diff) +
+                    ", z≈ " + zTxt + "\n";
+                });
+              } else {
+                numTxt += "  No se observaron valores con tasas claramente superiores a la global (n≥20).\n";
+              }
+
+              if (bajos.length) {
+                numTxt += "  Valores asociados a una tasa de respuesta favorable menor que la global:\n";
+                bajos.forEach(c => {
+                  const zTxt = (c.z === null) ? "NA" : c.z.toFixed(2);
+                  numTxt +=
+                    "    - " + c.val +
+                    " | n=" + c.n +
+                    ", favorables=" + c.fav +
+                    ", tasa=" + formatPct(c.tasa) +
+                    ", diferencia vs global=" + formatDiff(c.diff) +
+                    ", z≈ " + zTxt + "\n";
+                });
+              } else {
+                numTxt += "  No se observaron valores con tasas claramente inferiores a la global (n≥20).\n";
+              }
+
+              numTxt += "\n";
+            });
+
+            numTxt += "Nota: los z-scores son aproximados y sirven como indicador de si la diferencia\n";
+            numTxt += "entre la tasa local y la tasa global podría ser estadísticamente relevante.\n\n";
+          } else {
+            numTxt += "No se detectaron RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND};\n";
+            numTxt += "no se construyen tasas de 'respuesta favorable' ni z-scores.\n\n";
+          }
+
+          // 👉 Sección 5
           numericEl.textContent = numTxt;
 
-          // 👉 Sección 7: gráfico de distribución de RESPONSE
+          // 👉 Sección 7: gráfico de distribución de RESPONSE (como antes)
           prepararDatosGrafico({
             labels: sortedResponses.map(([r]) => r),
             values: sortedResponses.map(([, c]) => c),
@@ -1604,7 +1964,8 @@
 
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "response_rel");
-            statusEl.textContent = "✅ Análisis RESPONSE vs otras columnas (numérico) generado. Esperando respuesta del LLM en la sección 6…";
+            statusEl.textContent =
+              "✅ Análisis RESPONSE vs otras columnas (numérico avanzado) generado. Esperando respuesta del LLM en la sección 6…";
           }
         },
         error: function(err) {
@@ -1616,80 +1977,6 @@
       });
     }
 
-    // -------------------------------------------------------------
-    // NUEVO: Generar PDF con secciones 6 y 7
-    // -------------------------------------------------------------
-    function descargarPDF() {
-      const textEl = document.getElementById("textOutput");
-      const titleInput = document.getElementById("reportTitle");
-      const canvas = document.getElementById("chartCanvas");
-
-      const { jsPDF } = window.jspdf || {};
-      if (!jsPDF) {
-        alert("No se pudo cargar jsPDF. Verifica la conexión a internet.");
-        return;
-      }
-
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const margin = 40;
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-
-      const titulo = (titleInput && titleInput.value.trim())
-        ? titleInput.value.trim()
-        : "Reporte de análisis de Consumertec";
-
-      let y = margin + 10;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.text(titulo, margin, y);
-      y += 24;
-
-      // Sección 6: texto
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-
-      const contenido = textEl ? (textEl.textContent || "").trim() : "";
-      const textoReporte = contenido || "Sin contenido en la sección 6.";
-
-      const maxWidth = pageWidth - margin * 2;
-      const lineas = doc.splitTextToSize(textoReporte, maxWidth);
-
-      lineas.forEach(linea => {
-        if (y > pageHeight - margin) {
-          doc.addPage();
-          y = margin;
-        }
-        doc.text(linea, margin, y);
-        y += 14;
-      });
-
-      // Sección 7: gráfico (si existe)
-      if (chartInstance && canvas) {
-        const imgData = chartInstance.toBase64Image(); // PNG base64
-        const imgWidth = pageWidth - margin * 2;
-        const imgHeight = imgWidth * (canvas.height / canvas.width || 0.6);
-
-        if (y + imgHeight > pageHeight - margin) {
-          doc.addPage();
-          y = margin;
-        }
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text("Visualización gráfica de resultados (Sección 7)", margin, y);
-        y += 18;
-
-        doc.addImage(imgData, "PNG", margin, y, imgWidth, imgHeight);
-        y += imgHeight + 10;
-      }
-
-      const fileNameSafe = titulo.replace(/[\\\/:*?"<>|]+/g, "_");
-      doc.save(fileNameSafe + ".pdf");
-    }
-
-    window.descargarPDF = descargarPDF;
   </script>
 </body>
 </html>
