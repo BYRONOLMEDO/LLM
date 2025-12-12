@@ -394,6 +394,20 @@
       <div class="chart-wrapper">
         <canvas id="chartCanvas"></canvas>
       </div>
+         <!-- NUEVO: segundo gráfico multivariable -->
+      <div id="chartMultiStatus" class="status">
+        ⚠️ Aún no hay datos para el gráfico multivariable. Ejecuta un análisis compatible (por ejemplo, Comparaciones).
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="chartCanvasMulti"></canvas>
+      </div>
+        <!-- NUEVO: segundo gráfico multivariable -->
+      <div id="chartMultiStatus" class="status">
+        ⚠️ Aún no hay datos para el gráfico multivariable. Ejecuta un análisis compatible (por ejemplo, Comparaciones).
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="chartCanvasMulti"></canvas>
+      </div>
     </div>
   </div>
   <!-- Lógica: CSV + análisis interno + LLM + gráficos + PDF -->
@@ -414,6 +428,9 @@
     // NUEVO: estado gráfico (sección 7)
     let chartInstance = null;
     let lastChartData = null;      // { labels, values, datasetLabel, title, xLabel, yLabel }
+       // NUEVO: estado para gráfico multivariable (sección 7)
+    let chartInstanceMulti = null;
+    let lastChartDataMulti = null; // { labels, datasets: [{label, values}], title, xLabel, yLabel }
 
     // Tipos de análisis detectados como compatibles
     const tiposDisponibles = {
@@ -530,6 +547,109 @@
       renderChartInternal();
     }
     window.cambiarTipoGrafico = cambiarTipoGrafico;
+      // -------------------------------------------------------------
+    // Helpers para gráfico multivariable (segundo gráfico)
+    // -------------------------------------------------------------
+    function prepararDatosGraficoMultivariable(data) {
+      lastChartDataMulti = data || null;
+      const chartMultiStatusEl = document.getElementById("chartMultiStatus");
+
+      if (!lastChartDataMulti ||
+          !lastChartDataMulti.labels ||
+          !lastChartDataMulti.labels.length ||
+          !lastChartDataMulti.datasets ||
+          !lastChartDataMulti.datasets.length) {
+        if (chartMultiStatusEl) {
+          chartMultiStatusEl.textContent =
+            "⚠️ No se generaron datos suficientes para el gráfico multivariable.";
+        }
+        if (chartInstanceMulti) {
+          chartInstanceMulti.destroy();
+          chartInstanceMulti = null;
+        }
+        return;
+      }
+
+      if (chartMultiStatusEl) {
+        chartMultiStatusEl.textContent =
+          "✅ Datos listos para el gráfico multivariable: " +
+          (lastChartDataMulti.title || "gráfico multivariable a partir del resumen numérico.");
+      }
+
+      renderChartMultivariable();
+    }
+
+    function renderChartMultivariable() {
+      const canvas = document.getElementById("chartCanvasMulti");
+      const chartMultiStatusEl = document.getElementById("chartMultiStatus");
+
+      if (!canvas ||
+          !lastChartDataMulti ||
+          !lastChartDataMulti.labels ||
+          !lastChartDataMulti.labels.length ||
+          !lastChartDataMulti.datasets ||
+          !lastChartDataMulti.datasets.length) {
+        if (chartMultiStatusEl) {
+          chartMultiStatusEl.textContent =
+            "⚠️ Aún no hay datos para el gráfico multivariable.";
+        }
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (chartInstanceMulti) {
+        chartInstanceMulti.destroy();
+        chartInstanceMulti = null;
+      }
+
+      // Para el multivariable dejamos el tipo fijo en 'bar' (barras agrupadas)
+      chartInstanceMulti = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: lastChartDataMulti.labels,
+          datasets: lastChartDataMulti.datasets.map(ds => ({
+            label: ds.label,
+            data: ds.values,
+            fill: false
+          }))
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true },
+            title: {
+              display: !!lastChartDataMulti.title,
+              text: lastChartDataMulti.title
+            }
+          },
+          scales: {
+            x: {
+              title: {
+                display: !!lastChartDataMulti.xLabel,
+                text: lastChartDataMulti.xLabel
+              },
+              ticks: {
+                autoSkip: true,
+                maxRotation: 45,
+                minRotation: 0
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: !!lastChartDataMulti.yLabel,
+                text: lastChartDataMulti.yLabel
+              }
+            }
+          }
+        }
+      });
+
+      if (chartMultiStatusEl) {
+        chartMultiStatusEl.textContent = "✅ Gráfico multivariable actualizado correctamente.";
+      }
+    }
 
     // -------------------------------------------------------------
     // Actualizar visibilidad de grupos de prompts
@@ -601,6 +721,17 @@
       const chartStatusEl = document.getElementById("chartStatus");
       if (chartStatusEl) {
         chartStatusEl.textContent = "⚠️ Aún no hay datos para graficar. Ejecuta un análisis primero.";
+      }
+         // NUEVO: reset gráfico multivariable
+      lastChartDataMulti = null;
+      if (chartInstanceMulti) {
+        chartInstanceMulti.destroy();
+        chartInstanceMulti = null;
+      }
+      const chartMultiStatusEl = document.getElementById("chartMultiStatus");
+      if (chartMultiStatusEl) {
+        chartMultiStatusEl.textContent =
+          "⚠️ Aún no hay datos para el gráfico multivariable. Ejecuta un análisis compatible (por ejemplo, Comparaciones).";
       }
 
       if (!file) {
@@ -945,7 +1076,17 @@
       if (chartStatusEl) {
         chartStatusEl.textContent = "⏳ Preparando datos para posibles gráficos…";
       }
-
+      // NUEVO: reset gráfico multivariable antes de cada nuevo análisis
+      lastChartDataMulti = null;
+      if (chartInstanceMulti) {
+        chartInstanceMulti.destroy();
+        chartInstanceMulti = null;
+      }
+      const chartMultiStatusEl = document.getElementById("chartMultiStatus");
+      if (chartMultiStatusEl) {
+        chartMultiStatusEl.textContent =
+          "⏳ Preparando datos para el gráfico multivariable (si el modo lo soporta)…";
+      }
       const usarBackendLLM = true;  // SIEMPRE LLM para la explicación
 
       if (analysisMode === "whiteness") {
@@ -962,293 +1103,334 @@
     window.analizarCSV = analizarCSVInternal;
 
       // -------------------------------------------------------------
-    // Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (versión avanzada)
-    //   - Mantiene los recuentos absolutos
-    //   - Añade tasas de desempeño por producto
-    //   - Estima significancia (z-score vs tasa global)
-    //   - Analiza contextos (MODALITY, SCENARIOS, WASH, PROCESS)
-    //     como posibles efectos de confusión
-    // -------------------------------------------------------------
-    function analizarComparaciones(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
-      const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
+// Modo 1: Comparaciones PRODUCT_TEST vs RESPONSE (versión avanzada)
+//   - Mantiene los recuentos absolutos
+//   - Añade tasas de desempeño por producto
+//   - Estima significancia (z-score vs tasa global)
+//   - Analiza contextos (MODALITY, SCENARIOS, WASH, PROCESS)
+//     como posibles efectos de confusión
+//   - Explicita medidas cuantitativas directas de desempeño
+//     e información sobre variabilidad interna e interacciones
+// -------------------------------------------------------------
+function analizarComparaciones(statusEl, numericEl, textEl, userPrompt, usarBackendLLM) {
+  const objetivos = new Set(["01.SUPERIOR", "02.SUPERIOR_TREND"]);
 
-      // Favorables por PRODUCT_TEST (como antes)
-      const conteosFavorables = {};
-      // Total de comparaciones por PRODUCT_TEST (para tasas)
-      const totalPorProducto = {};
+  // Favorables por PRODUCT_TEST (como antes)
+  const conteosFavorables = {};
+  // Total de comparaciones por PRODUCT_TEST (para tasas)
+  const totalPorProducto = {};
 
-      // Contextos para interrelación / posibles efectos de confusión
-      // Para cada variable de contexto guardamos total y favorables
-      const contextoStats = {
-        MODALITY: {},
-        SCENARIOS: {},
-        WASH: {},
-        PROCESS: {}
-      };
+  // Contextos para interrelación / posibles efectos de confusión
+  // Para cada variable de contexto guardamos total y favorables
+  const contextoStats = {
+    MODALITY: {},
+    SCENARIOS: {},
+    WASH: {},
+    PROCESS: {}
+  };
 
-      let totalFilas = 0;        // filas totales leídas del CSV
-      let totalComparaciones = 0; // filas con PRODUCT_TEST definido
-      let totalFiltradas = 0;    // filas con RESPONSE favorable
+  let totalFilas = 0;        // filas totales leídas del CSV
+  let totalComparaciones = 0; // filas con PRODUCT_TEST definido
+  let totalFiltradas = 0;    // filas con RESPONSE favorable
 
-      Papa.parse(csvFile, {
-        header: true,
-        skipEmptyLines: true,
-        worker: false,
-        chunkSize: 1024 * 1024,
-        chunk: function(results) {
-          const rows = results.data;
-          for (const row of rows) {
-            totalFilas++;
+  Papa.parse(csvFile, {
+    header: true,
+    skipEmptyLines: true,
+    worker: false,
+    chunkSize: 1024 * 1024,
+    chunk: function(results) {
+      const rows = results.data;
+      for (const row of rows) {
+        totalFilas++;
 
-            const ptestRaw = row["PRODUCT_TEST"];
-            const ptest = (ptestRaw || "").trim() || "(VACÍO)";
-            if (ptest) {
-              totalComparaciones++;
-              totalPorProducto[ptest] = (totalPorProducto[ptest] || 0) + 1;
-            }
-
-            const resp = (row["RESPONSE"] || "").trim();
-            const esFavorable = objetivos.has(resp);
-
-            if (esFavorable) {
-              totalFiltradas++;
-              if (ptest) {
-                conteosFavorables[ptest] = (conteosFavorables[ptest] || 0) + 1;
-              }
-            }
-
-            // Actualizar contextos: MODALITY, SCENARIOS, WASH, PROCESS
-            for (const ctxName of Object.keys(contextoStats)) {
-              const vRaw = row[ctxName];
-              const v = (vRaw || "").trim() || "(VACÍO)";
-              if (!contextoStats[ctxName][v]) {
-                contextoStats[ctxName][v] = { total: 0, fav: 0 };
-              }
-              contextoStats[ctxName][v].total++;
-              if (esFavorable) {
-                contextoStats[ctxName][v].fav++;
-              }
-            }
-          }
-        },
-        complete: function() {
-          if (!Object.keys(conteosFavorables).length) {
-            statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
-            numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
-            textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión con el LLM.";
-            prepararDatosGrafico(null);
-            return;
-          }
-
-          // -------------------------------------------------------
-          // 1) Medidas básicas globales
-          // -------------------------------------------------------
-          const totalFavorables = Object.values(conteosFavorables)
-            .reduce((s, c) => s + c, 0);
-
-          const tasaGlobal = (totalComparaciones > 0)
-            ? (totalFavorables / totalComparaciones)
-            : 0;
-
-          // Helper para porcentajes
-          const formatPct = (v) => (v * 100).toFixed(2) + "%";
-
-          // -------------------------------------------------------
-          // 2) Medidas cuantitativas de desempeño por PRODUCT_TEST
-          //    (tasa favorable, diferencia vs global, z-score, IC)
-          // -------------------------------------------------------
-          const productos = Object.keys(totalPorProducto).map(prod => {
-            const n = totalPorProducto[prod] || 0;
-            const k = conteosFavorables[prod] || 0;
-            const tasa = n > 0 ? (k / n) : 0;
-            const diff = tasa - tasaGlobal;
-
-            let z = null;
-            let ciLow = null;
-            let ciHigh = null;
-
-            if (n > 0 && tasaGlobal > 0 && tasaGlobal < 1) {
-              const se = Math.sqrt(tasaGlobal * (1 - tasaGlobal) / n);
-              if (se > 0) {
-                z = diff / se;
-                const half = 1.96 * se;
-                ciLow = tasa - half;
-                ciHigh = tasa + half;
-              }
-            }
-
-            return { prod, n, k, tasa, diff, z, ciLow, ciHigh };
-          });
-
-          // Ordenamos por tasa favorable descendente
-          productos.sort((a, b) => b.tasa - a.tasa);
-
-          // -------------------------------------------------------
-          // 3) Interrelación y posibles efectos de confusión
-          //    (contextos con tasas muy altas o muy bajas)
-          // -------------------------------------------------------
-          const contextoResumen = [];
-
-          for (const ctxName of Object.keys(contextoStats)) {
-            const mapa = contextoStats[ctxName];
-            const arr = Object.entries(mapa).map(([valor, st]) => {
-              const tasaCtx = st.total > 0 ? (st.fav / st.total) : 0;
-              const diffCtx = tasaCtx - tasaGlobal;
-              return {
-                valor,
-                total: st.total,
-                fav: st.fav,
-                tasa: tasaCtx,
-                diff: diffCtx
-              };
-            });
-
-            // Filtramos para evitar ruido extremo (muy pocos casos)
-            const arrFiltrado = arr.filter(x => x.total >= 20);
-
-            // Contextos con tasas muy por encima de la media
-            const topAltos = arrFiltrado
-              .filter(x => x.diff > 0)
-              .sort((a, b) => b.diff - a.diff)
-              .slice(0, 3);
-
-            // Contextos con tasas muy por debajo de la media
-            const topBajos = arrFiltrado
-              .filter(x => x.diff < 0)
-              .sort((a, b) => a.diff - b.diff)
-              .slice(0, 3);
-
-            contextoResumen.push({
-              ctxName,
-              altos: topAltos,
-              bajos: topBajos
-            });
-          }
-
-          // -------------------------------------------------------
-          // 4) Construcción del TEXTO de la sección 5
-          // -------------------------------------------------------
-          let numTxt = "";
-
-          // 4.1 Panorama global
-          numTxt += "PANORAMA GLOBAL DE LAS COMPARACIONES\n";
-          numTxt += "------------------------------------\n";
-          numTxt += "Total de filas leídas en el CSV: " + totalFilas + "\n";
-          numTxt += "Total de comparaciones con PRODUCT_TEST definido: " + totalComparaciones + "\n";
-          numTxt += "Filas con RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}: " + totalFiltradas + "\n";
-          numTxt += "Tasa global de resultados favorables: " + formatPct(tasaGlobal) + "\n\n";
-
-          // 4.2 Medidas cuantitativas por producto
-          numTxt += "MEDIDAS CUANTITATIVAS DE DESEMPEÑO POR PRODUCT_TEST\n";
-          numTxt += "---------------------------------------------------\n";
-          numTxt += "Ordenado por tasa favorable (k/n), con indicador de significancia aproximada vs tasa global.\n";
-          numTxt += "Las tasas se expresan como proporción de comparaciones en las que el producto resulta favorable.\n\n";
-          numTxt += "Producto | n total | k favorables | Tasa favorable | Diferencia vs global | z-score | IC 95% aprox.\n";
-          numTxt += "---------|---------|-------------|----------------|----------------------|---------|----------------\n";
-
-          productos.forEach(p => {
-            const diffPct = (p.diff * 100).toFixed(2);
-            const zTxt = (p.z === null) ? "NA" : p.z.toFixed(2);
-
-            let icTxt = "NA";
-            if (p.ciLow !== null && p.ciHigh !== null) {
-              const low = Math.max(0, Math.min(1, p.ciLow));
-              const high = Math.max(0, Math.min(1, p.ciHigh));
-              icTxt = "[" + formatPct(low) + " ; " + formatPct(high) + "]";
-            }
-
-            numTxt +=
-              p.prod + " | " +
-              p.n + " | " +
-              p.k + " | " +
-              formatPct(p.tasa) + " | " +
-              (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p. | " +
-              zTxt + " | " +
-              icTxt + "\n";
-          });
-
-          numTxt += "\n";
-          numTxt += "Interpretación rápida del z-score:\n";
-          numTxt += "- |z| ≈ 0–1.5: diferencias pequeñas o poco claras.\n";
-          numTxt += "- |z| ≈ 1.5–2.0: tendencia a diferencia, pero con incertidumbre.\n";
-          numTxt += "- |z| ≥ 2.0: posible diferencia estadísticamente relevante frente a la tasa global.\n\n";
-
-          // 4.3 Interrelación entre variables y posibles efectos de confusión
-          numTxt += "INTERRELACIÓN ENTRE VARIABLES Y POSIBLES EFECTOS DE CONFUSIÓN\n";
-          numTxt += "------------------------------------------------------------\n";
-          numTxt += "Se exploran MODALITY, SCENARIOS, WASH y PROCESS como contextos que pueden favorecer o penalizar\n";
-          numTxt += "la tasa de resultados favorables frente a la tasa global.\n\n";
-
-          contextoResumen.forEach(ctx => {
-            numTxt += "Variable de contexto: " + ctx.ctxName + "\n";
-
-            if (ctx.altos.length) {
-              numTxt += "  Contextos con tasa favorable claramente superior a la media global:\n";
-              ctx.altos.forEach(c => {
-                const diffPct = (c.diff * 100).toFixed(2);
-                numTxt +=
-                  "    - " + c.valor +
-                  " | n=" + c.total +
-                  ", favorables=" + c.fav +
-                  ", tasa=" + formatPct(c.tasa) +
-                  ", diferencia vs global=" +
-                  (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p.\n";
-              });
-            } else {
-              numTxt += "  No se observaron contextos con tasas muy por encima de la media (con n≥20).\n";
-            }
-
-            if (ctx.bajos.length) {
-              numTxt += "  Contextos con tasa favorable claramente por debajo de la media global:\n";
-              ctx.bajos.forEach(c => {
-                const diffPct = (c.diff * 100).toFixed(2);
-                numTxt +=
-                  "    - " + c.valor +
-                  " | n=" + c.total +
-                  ", favorables=" + c.fav +
-                  ", tasa=" + formatPct(c.tasa) +
-                  ", diferencia vs global=" + diffPct + " p.p.\n";
-              });
-            } else {
-              numTxt += "  No se observaron contextos con tasas muy por debajo de la media (con n≥20).\n";
-            }
-
-            numTxt += "\n";
-          });
-
-          // 👉 Sección 5 SIEMPRE usa este cálculo interno enriquecido
-          numericEl.textContent = numTxt;
-
-          // 👉 Sección 7: gráfico de barras/líneas de conteos por PRODUCT_TEST (como antes)
-          const ordenadosPorFavorable = Object.entries(conteosFavorables)
-            .sort((a, b) => b[1] - a[1]);
-
-          prepararDatosGrafico({
-            labels: ordenadosPorFavorable.map(([prod]) => prod),
-            values: ordenadosPorFavorable.map(([, cnt]) => cnt),
-            datasetLabel: "Resultados favorables",
-            title: "Resultados favorables por PRODUCT_TEST",
-            xLabel: "PRODUCT_TEST",
-            yLabel: "Número de resultados favorables"
-          });
-
-          if (usarBackendLLM) {
-            // Seguimos enviando numTxt por si en el futuro quieres que el backend lo use,
-            // aunque actualmente el modelo solo se guía por el prompt de la sección 3.
-            pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
-            statusEl.textContent =
-              "✅ Análisis de comparaciones numérico avanzado generado. " +
-              "Esperando respuesta del LLM en la sección 6…";
-          }
-        },
-        error: function(err) {
-          statusEl.textContent = "❌ Error al leer el CSV: " + err;
-          numericEl.textContent = "// Error al procesar el archivo.";
-          textEl.textContent = "";
-          prepararDatosGrafico(null);
+        const ptestRaw = row["PRODUCT_TEST"];
+        const ptest = (ptestRaw || "").trim() || "(VACÍO)";
+        if (ptest) {
+          totalComparaciones++;
+          totalPorProducto[ptest] = (totalPorProducto[ptest] || 0) + 1;
         }
+
+        const resp = (row["RESPONSE"] || "").trim();
+        const esFavorable = objetivos.has(resp);
+
+        if (esFavorable) {
+          totalFiltradas++;
+          if (ptest) {
+            conteosFavorables[ptest] = (conteosFavorables[ptest] || 0) + 1;
+          }
+        }
+
+        // Actualizar contextos: MODALITY, SCENARIOS, WASH, PROCESS
+        for (const ctxName of Object.keys(contextoStats)) {
+          const vRaw = row[ctxName];
+          const v = (vRaw || "").trim() || "(VACÍO)";
+          if (!contextoStats[ctxName][v]) {
+            contextoStats[ctxName][v] = { total: 0, fav: 0 };
+          }
+          contextoStats[ctxName][v].total++;
+          if (esFavorable) {
+            contextoStats[ctxName][v].fav++;
+          }
+        }
+      }
+    },
+    complete: function() {
+      if (!Object.keys(conteosFavorables).length) {
+        statusEl.textContent = "❌ No se encontraron filas con RESPONSE = 01.SUPERIOR o 02.SUPERIOR_TREND.";
+        numericEl.textContent = "// Sin resultados favorables para PRODUCT_TEST.";
+        textEl.textContent = "// No hay suficientes datos favorables para generar una conclusión con el LLM.";
+        prepararDatosGrafico(null);
+        return;
+      }
+
+      // -------------------------------------------------------
+      // 1) Medidas básicas globales
+      // -------------------------------------------------------
+      const totalFavorables = Object.values(conteosFavorables)
+        .reduce((s, c) => s + c, 0);
+
+      const tasaGlobal = (totalComparaciones > 0)
+        ? (totalFavorables / totalComparaciones)
+        : 0;
+
+      // Helper para porcentajes
+      const formatPct = (v) => (v * 100).toFixed(2) + "%";
+
+      // -------------------------------------------------------
+      // 2) Medidas cuantitativas de desempeño por PRODUCT_TEST
+      //    (tasa favorable, diferencia vs global, z-score, IC)
+      // -------------------------------------------------------
+      const productos = Object.keys(totalPorProducto).map(prod => {
+        const n = totalPorProducto[prod] || 0;
+        const k = conteosFavorables[prod] || 0;
+        const tasa = n > 0 ? (k / n) : 0;
+        const diff = tasa - tasaGlobal;
+
+        let z = null;
+        let ciLow = null;
+        let ciHigh = null;
+
+        if (n > 0 && tasaGlobal > 0 && tasaGlobal < 1) {
+          const se = Math.sqrt(tasaGlobal * (1 - tasaGlobal) / n);
+          if (se > 0) {
+            z = diff / se;
+            const half = 1.96 * se;
+            ciLow = tasa - half;
+            ciHigh = tasa + half;
+          }
+        }
+
+        return { prod, n, k, tasa, diff, z, ciLow, ciHigh };
       });
+
+      // Ordenamos por tasa favorable descendente
+      productos.sort((a, b) => b.tasa - a.tasa);
+
+      // -------------------------------------------------------
+      // 3) Interrelación y posibles efectos de confusión
+      //    (contextos con tasas muy altas o muy bajas)
+      // -------------------------------------------------------
+      const contextoResumen = [];
+
+      for (const ctxName of Object.keys(contextoStats)) {
+        const mapa = contextoStats[ctxName];
+        const arr = Object.entries(mapa).map(([valor, st]) => {
+          const tasaCtx = st.total > 0 ? (st.fav / st.total) : 0;
+          const diffCtx = tasaCtx - tasaGlobal;
+          return {
+            valor,
+            total: st.total,
+            fav: st.fav,
+            tasa: tasaCtx,
+            diff: diffCtx
+          };
+        });
+
+        // Filtramos para evitar ruido extremo (muy pocos casos)
+        const arrFiltrado = arr.filter(x => x.total >= 20);
+
+        // Contextos con tasas muy por encima de la media
+        const topAltos = arrFiltrado
+          .filter(x => x.diff > 0)
+          .sort((a, b) => b.diff - a.diff)
+          .slice(0, 3);
+
+        // Contextos con tasas muy por debajo de la media
+        const topBajos = arrFiltrado
+          .filter(x => x.diff < 0)
+          .sort((a, b) => a.diff - b.diff)
+          .slice(0, 3);
+
+        contextoResumen.push({
+          ctxName,
+          altos: topAltos,
+          bajos: topBajos
+        });
+      }
+
+      // -------------------------------------------------------
+      // 4) Construcción del TEXTO de la sección 5
+      // -------------------------------------------------------
+      let numTxt = "";
+
+      // 🔹 BLOQUE EXPLÍCITO: medidas de desempeño + variabilidad + interacciones
+      numTxt += "CAPACIDAD ANALÍTICA DISPONIBLE EN ESTE MODO (COMPARACIONES)\n";
+      numTxt += "================================================================\n";
+      numTxt += "- Medidas cuantitativas directas de desempeño más allá de la tasa global:\n";
+      numTxt += "  • Tasas favorables específicas por PRODUCT_TEST (k/n) y su diferencia\n";
+      numTxt += "    frente a la tasa global de éxito.\n";
+      numTxt += "  • Intervalos de confianza aproximados (IC 95%) por producto para acotar\n";
+      numTxt += "    la magnitud esperada de rendimiento.\n";
+      numTxt += "- Información sobre variabilidad interna e interacciones entre variables:\n";
+      numTxt += "  • La comparación simultánea de PRODUCT_TEST con MODALITY, SCENARIOS,\n";
+      numTxt += "    WASH y PROCESS permite evaluar cómo cambia el desempeño del producto\n";
+      numTxt += "    según el contexto experimental.\n";
+      numTxt += "  • Las diferencias de tasa entre contextos funcionan como indicador de\n";
+      numTxt += "    posibles interacciones y efectos de confusión (escenarios que inflan\n";
+      numTxt += "    o deprimen artificialmente el rendimiento observado).\n\n";
+
+      // 4.1 Panorama global
+      numTxt += "PANORAMA GLOBAL DE LAS COMPARACIONES\n";
+      numTxt += "------------------------------------\n";
+      numTxt += "Total de filas leídas en el CSV: " + totalFilas + "\n";
+      numTxt += "Total de comparaciones con PRODUCT_TEST definido: " + totalComparaciones + "\n";
+      numTxt += "Filas con RESPONSE en {01.SUPERIOR, 02.SUPERIOR_TREND}: " + totalFiltradas + "\n";
+      numTxt += "Tasa global de resultados favorables: " + formatPct(tasaGlobal) + "\n\n";
+
+      // 4.2 Medidas cuantitativas por producto
+      numTxt += "MEDIDAS CUANTITATIVAS DE DESEMPEÑO POR PRODUCT_TEST\n";
+      numTxt += "---------------------------------------------------\n";
+      numTxt += "Ordenado por tasa favorable (k/n), con indicador de significancia aproximada vs tasa global.\n";
+      numTxt += "Las tasas se expresan como proporción de comparaciones en las que el producto resulta favorable.\n\n";
+      numTxt += "Producto | n total | k favorables | Tasa favorable | Diferencia vs global | z-score | IC 95% aprox.\n";
+      numTxt += "---------|---------|-------------|----------------|----------------------|---------|----------------\n";
+
+      productos.forEach(p => {
+        const diffPct = (p.diff * 100).toFixed(2);
+        const zTxt = (p.z === null) ? "NA" : p.z.toFixed(2);
+
+        let icTxt = "NA";
+        if (p.ciLow !== null && p.ciHigh !== null) {
+          const low = Math.max(0, Math.min(1, p.ciLow));
+          const high = Math.max(0, Math.min(1, p.ciHigh));
+          icTxt = "[" + formatPct(low) + " ; " + formatPct(high) + "]";
+        }
+
+        numTxt +=
+          p.prod + " | " +
+          p.n + " | " +
+          p.k + " | " +
+          formatPct(p.tasa) + " | " +
+          (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p. | " +
+          zTxt + " | " +
+          icTxt + "\n";
+      });
+
+      numTxt += "\n";
+      numTxt += "Interpretación rápida del z-score:\n";
+      numTxt += "- |z| ≈ 0–1.5: diferencias pequeñas o poco claras.\n";
+      numTxt += "- |z| ≈ 1.5–2.0: tendencia a diferencia, pero con incertidumbre.\n";
+      numTxt += "- |z| ≥ 2.0: posible diferencia estadísticamente relevante frente a la tasa global.\n\n";
+
+      // 4.3 Interrelación entre variables y posibles efectos de confusión
+      numTxt += "INTERRELACIÓN ENTRE VARIABLES Y POSIBLES EFECTOS DE CONFUSIÓN\n";
+      numTxt += "------------------------------------------------------------\n";
+      numTxt += "Se exploran MODALITY, SCENARIOS, WASH y PROCESS como contextos que pueden favorecer o penalizar\n";
+      numTxt += "la tasa de resultados favorables frente a la tasa global.\n\n";
+
+      contextoResumen.forEach(ctx => {
+        numTxt += "Variable de contexto: " + ctx.ctxName + "\n";
+
+        if (ctx.altos.length) {
+          numTxt += "  Contextos con tasa favorable claramente superior a la media global:\n";
+          ctx.altos.forEach(c => {
+            const diffPct = (c.diff * 100).toFixed(2);
+            numTxt +=
+              "    - " + c.valor +
+              " | n=" + c.total +
+              ", favorables=" + c.fav +
+              ", tasa=" + formatPct(c.tasa) +
+              ", diferencia vs global=" +
+              (diffPct >= 0 ? "+" + diffPct : diffPct) + " p.p.\n";
+          });
+        } else {
+          numTxt += "  No se observaron contextos con tasas muy por encima de la media (con n≥20).\n";
+        }
+
+        if (ctx.bajos.length) {
+          numTxt += "  Contextos con tasa favorable claramente por debajo de la media global:\n";
+          ctx.bajos.forEach(c => {
+            const diffPct = (c.diff * 100).toFixed(2);
+            numTxt +=
+              "    - " + c.valor +
+              " | n=" + c.total +
+              ", favorables=" + c.fav +
+              ", tasa=" + formatPct(c.tasa) +
+              ", diferencia vs global=" + diffPct + " p.p.\n";
+          });
+        } else {
+          numTxt += "  No se observaron contextos con tasas muy por debajo de la media (con n≥20).\n";
+        }
+
+        numTxt += "\n";
+      });
+
+      // 👉 Sección 5 SIEMPRE usa este cálculo interno enriquecido
+      numericEl.textContent = numTxt;
+
+      // 👉 Sección 7: gráfico de barras/líneas de conteos por PRODUCT_TEST (como antes)
+      const ordenadosPorFavorable = Object.entries(conteosFavorables)
+        .sort((a, b) => b[1] - a[1]);
+
+      prepararDatosGrafico({
+        labels: ordenadosPorFavorable.map(([prod]) => prod),
+        values: ordenadosPorFavorable.map(([, cnt]) => cnt),
+        datasetLabel: "Resultados favorables",
+        title: "Resultados favorables por PRODUCT_TEST",
+        xLabel: "PRODUCT_TEST",
+        yLabel: "Número de resultados favorables"
+      });
+        
+         // 👉 NUEVO: gráfico multivariable (sección 7) para el modo Comparaciones
+      //     - Serie 1: tasa favorable (%) por PRODUCT_TEST
+      //     - Serie 2: número total de comparaciones por PRODUCT_TEST
+      const labelsMulti = productos.map(p => p.prod);
+      const valuesTasa = productos.map(p => p.tasa * 100);  // porcentaje
+      const valuesN = productos.map(p => p.n);              // número de comparaciones
+
+      prepararDatosGraficoMultivariable({
+        labels: labelsMulti,
+        datasets: [
+          {
+            label: "Tasa favorable (%)",
+            values: valuesTasa
+          },
+          {
+            label: "Número total de comparaciones",
+            values: valuesN
+          }
+        ],
+        title: "Tasa favorable (%) y nº de comparaciones por PRODUCT_TEST",
+        xLabel: "PRODUCT_TEST",
+        yLabel: "Escala relativa (tasa % y conteos)"
+      });
+
+      if (usarBackendLLM) {
+        // numeric_summary lleva TODO este contenido enriquecido a /generate_answer
+        pedirExplicacionDesdeBackend(userPrompt, numTxt, "comparaciones");
+        statusEl.textContent =
+          "✅ Análisis de comparaciones numérico avanzado generado. " +
+          "Esperando respuesta del LLM en la sección 6…";
+      }
+    },
+    error: function(err) {
+      statusEl.textContent = "❌ Error al leer el CSV: " + err;
+      numericEl.textContent = "// Error al procesar el archivo.";
+      textEl.textContent = "";
+      prepararDatosGrafico(null);
     }
+  });
+}
 
 
        // -------------------------------------------------------------
@@ -1589,6 +1771,8 @@
             xLabel: "PRODUCT",
             yLabel: "Número de apariciones como máximo"
           });
+             // Este modo no genera gráfico multivariable por ahora
+          prepararDatosGraficoMultivariable(null);
 
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "whiteness");
@@ -1718,6 +1902,8 @@
             xLabel: "Columnas",
             yLabel: "Número de valores no vacíos"
           });
+             // Este modo no genera gráfico multivariable por ahora
+          prepararDatosGraficoMultivariable(null);
 
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "resumen");
@@ -1961,6 +2147,8 @@
             xLabel: "Valores de RESPONSE",
             yLabel: "Número de filas"
           });
+             // Este modo no genera gráfico multivariable por ahora
+          prepararDatosGraficoMultivariable(null);
 
           if (usarBackendLLM) {
             pedirExplicacionDesdeBackend(userPrompt, numTxt, "response_rel");
